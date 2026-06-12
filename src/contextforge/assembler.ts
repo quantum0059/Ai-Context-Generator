@@ -13,6 +13,7 @@ import {
   generateTemplates,
 } from "./generators/docs";
 import { generateManifests } from "./generators/manifests";
+import { generatePromptMaterial } from "./generators/promptMaterial";
 import { generatePrompts } from "./generators/prompts";
 import { generateSkills } from "./generators/skills";
 
@@ -39,14 +40,16 @@ export async function assemblePackage(
   const validated = projectSpecSchema.parse(spec);
 
   const ordered = await orderFeatures(validated);
-  const [promptFiles, skillFiles, decisionFiles, templateFiles, setupFiles] = await Promise.all([
-    generatePrompts(validated),
-    Promise.resolve(generateSkills(validated)),
-    Promise.resolve(generateDecisions(validated)),
-    Promise.resolve(generateTemplates(validated)),
-    Promise.resolve(generateSetup(validated)),
-  ]);
-  const manifestFiles = generateManifests(validated, promptFiles);
+  const [promptFiles, materialFiles, skillFiles, decisionFiles, templateFiles, setupFiles] =
+    await Promise.all([
+      generatePrompts(validated),
+      generatePromptMaterial(validated),
+      Promise.resolve(generateSkills(validated)),
+      Promise.resolve(generateDecisions(validated)),
+      Promise.resolve(generateTemplates(validated)),
+      Promise.resolve(generateSetup(validated)),
+    ]);
+  const manifestFiles = generateManifests(validated, promptFiles, materialFiles);
   const { json: metaJson, meta } = generatePackageMeta(validated);
 
   const files: PackageFiles = {
@@ -58,6 +61,7 @@ export async function assemblePackage(
     "resources.md": generateResources(validated),
     "dependency-graph.md": generateDependencyGraph(validated, ordered),
     ...promptFiles,
+    ...materialFiles,
     ...skillFiles,
     ...decisionFiles,
     ...templateFiles,

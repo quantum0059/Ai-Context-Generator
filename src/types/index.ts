@@ -18,6 +18,7 @@ export type Category =
   | "payments"
   | "analytics"
   | "monitoring"
+  | "hosting"
   | "styling";
 
 export type Budget = "free-only" | "low" | "flexible";

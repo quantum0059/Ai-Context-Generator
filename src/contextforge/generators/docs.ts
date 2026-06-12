@@ -138,6 +138,27 @@ responses. No direct SDK imports in routes - only services.
 Use **${state}** with one store per domain. Actions live inside the store;
 server data stays in the data layer, UI state in stores.
 `,
+    "templates/hook-template.md": `# ${spec.projectName}: Hook Template
+
+Hooks expose \\\`{ data, error, loading }\\\`, fetch via the service layer only,
+clean up subscriptions on unmount, and contain no JSX.
+`,
+    "templates/service-template.md": `# ${spec.projectName}: Service Template
+
+The service layer is the ONLY place external SDKs are imported. Services
+return ${spec.projectName} domain types - never raw SDK responses - and throw
+typed errors callers can handle.
+`,
+    "templates/repository-template.md": `# ${spec.projectName}: Repository Template
+
+Repositories abstract persistence behind an interface (findById, save, delete).
+Queries map rows/documents to domain types; no persistence details leak upward.
+`,
+    "templates/test-template.md": `# ${spec.projectName}: Test Template
+
+Every public function gets: one happy-path test, one failure-path test.
+Arrange-Act-Assert structure; mock only at the service boundary.
+`,
   };
 }
 
