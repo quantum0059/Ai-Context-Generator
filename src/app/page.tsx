@@ -72,6 +72,10 @@ export default function Home() {
   const [generated, setGenerated] = useState<{ count: number; meta: PackageMeta } | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [lastSpec, setLastSpec] = useState<ProjectSpec | null>(null);
+  const [lastFiles, setLastFiles] = useState<Record<string, string> | null>(null);
+  const [regenInfo, setRegenInfo] = useState<{ changed: number; removed: number } | null>(null);
+  const [uploadedRefs, setUploadedRefs] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const allFeatures = () => [...features, ...split(otherFeatures)];
 
@@ -81,8 +85,25 @@ export default function Home() {
     platform,
     features: allFeatures(),
     constraints: { budget: budget || undefined, avoid: split(avoid) },
-    designReferences: split(designRefs),
+    designReferences: [...split(designRefs), ...uploadedRefs],
   });
+
+  async function uploadImage(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/contextforge/upload", { method: "POST", body: form });
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Upload failed.");
+      setUploadedRefs((u) => [...u, data.url as string]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function runDiscovery() {
     setBusy(true);
@@ -167,40 +188,73 @@ export default function Home() {
     return stack;
   }
 
+  async function downloadZip(files: Record<string, string>) {
+    const zip = new JSZip();
+    for (const [path, content] of Object.entries(files)) {
+      zip.file(`project-package/${path}`, content);
+    }
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-context-package.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function confirmAndGenerate() {
     setBusy(true);
     setError(null);
     setSaveMessage(null);
+    setRegenInfo(null);
     try {
-      const spec: ProjectSpec = {
-        id: crypto.randomUUID(),
-        ...draft(),
-        requiredCategories: categories,
-        stack: buildStack(),
-        projectSpecVersion: "1.0.0",
-      };
-      const res = await fetch("/api/contextforge/generate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(spec),
-      });
-      if (!res.ok) throw new Error("Package generation failed.");
-      const data = (await res.json()) as { files: Record<string, string>; meta: PackageMeta };
-
-      const zip = new JSZip();
-      for (const [path, content] of Object.entries(data.files)) {
-        zip.file(`project-package/${path}`, content);
+      if (lastSpec && lastFiles) {
+        // Regeneration: only generators affected by the edit re-run.
+        const editedSpec: ProjectSpec = {
+          id: lastSpec.id,
+          ...draft(),
+          requiredCategories: categories,
+          stack: buildStack(),
+          projectSpecVersion: lastSpec.projectSpecVersion,
+        };
+        const res = await fetch("/api/contextforge/regenerate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ oldSpec: lastSpec, editedSpec, oldFiles: lastFiles }),
+        });
+        if (!res.ok) throw new Error("Regeneration failed.");
+        const data = (await res.json()) as {
+          spec: ProjectSpec;
+          files: Record<string, string>;
+          meta: PackageMeta;
+          changed: string[];
+          removed: string[];
+        };
+        await downloadZip(data.files);
+        setGenerated({ count: Object.keys(data.files).length, meta: data.meta });
+        setRegenInfo({ changed: data.changed.length, removed: data.removed.length });
+        setLastSpec(data.spec);
+        setLastFiles(data.files);
+      } else {
+        const spec: ProjectSpec = {
+          id: crypto.randomUUID(),
+          ...draft(),
+          requiredCategories: categories,
+          stack: buildStack(),
+          projectSpecVersion: "1.0.0",
+        };
+        const res = await fetch("/api/contextforge/generate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(spec),
+        });
+        if (!res.ok) throw new Error("Package generation failed.");
+        const data = (await res.json()) as { files: Record<string, string>; meta: PackageMeta };
+        await downloadZip(data.files);
+        setGenerated({ count: Object.keys(data.files).length, meta: data.meta });
+        setLastSpec(spec);
+        setLastFiles(data.files);
       }
-      const blob = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-context-package.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      setGenerated({ count: Object.keys(data.files).length, meta: data.meta });
-      setLastSpec(spec);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -231,7 +285,12 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-bold">ContextForge</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">ContextForge</h1>
+        <a href="/dashboard" className="text-sm font-medium text-indigo-600 hover:underline">
+          Saved packages
+        </a>
+      </div>
       <p className="mt-2 text-slate-600">
         Generate a versioned AI context package - the persistent memory layer your AI
         coding assistants read so they stay architecturally consistent.
@@ -377,7 +436,27 @@ export default function Home() {
           <div>
             <label className={label}>Design references (URLs or a text description, comma/newline separated)</label>
             <textarea rows={4} className={input} value={designRefs} onChange={(e) => setDesignRefs(e.target.value)} placeholder="https://duolingo.com, playful rounded UI with bold colors" />
-            <p className="mt-1 text-xs text-slate-400">Image upload to Supabase Storage arrives in Phase 2; URLs and descriptions are included in the ProjectSpec today.</p>
+            <div className="mt-3">
+              <label className={label}>Or upload reference images (requires Supabase)</label>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadImage(f);
+                  e.target.value = "";
+                }}
+              />
+              {uploading && <p className="mt-1 text-xs text-slate-400">Uploading...</p>}
+              {uploadedRefs.length > 0 && (
+                <ul className="mt-2 list-disc pl-5 text-xs text-slate-500">
+                  {uploadedRefs.map((u) => (
+                    <li key={u}>{u}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
           <div className="flex gap-3">
             <button className={btnGhost} onClick={() => setStep(4)}>Back</button>
@@ -413,10 +492,18 @@ export default function Home() {
           </div>
           {generated && (
             <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
-              Generated {generated.count} files (packageVersion {generated.meta.packageVersion}, projectSpecVersion {generated.meta.projectSpecVersion}). ZIP downloaded.
+              {regenInfo
+                ? `Regenerated selectively: ${regenInfo.changed} files updated, ${regenInfo.removed} removed; unrelated files carried over unchanged.`
+                : `Generated ${generated.count} files.`}{" "}
+              (packageVersion {generated.meta.packageVersion}, projectSpecVersion {generated.meta.projectSpecVersion}). ZIP downloaded.
               <button className="ml-3 underline" onClick={saveToAccount}>Save to account</button>
               {saveMessage && <span className="ml-2">{saveMessage}</span>}
             </div>
+          )}
+          {lastSpec && (
+            <p className="text-xs text-slate-500">
+              Editing and confirming again runs <span className="font-medium">selective regeneration</span> - only generators affected by your change re-run, and versions bump automatically.
+            </p>
           )}
           <div className="flex gap-3">
             <button className={btnGhost} onClick={() => setStep(5)}>Back</button>

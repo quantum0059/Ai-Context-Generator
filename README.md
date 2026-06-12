@@ -108,9 +108,41 @@ Covers: heuristic discovery, tier 1/tier 2 suggestion resolution, spec
 finalization (validation + immutability), full package assembly, low-confidence
 warning propagation, manifest correctness, and the No Generic Content rule.
 
-## MVP scope and Phase 2
+## Phase 2 (implemented)
 
-Deferred to Phase 2 (data model already supports them): `prompt_material/`
-design-system and UI references, regeneration/versioning UI (selective
-generator re-runs on spec edits), registry admin panel, Stripe paywall,
-image upload to Supabase Storage.
+- **prompt_material/**: Claude-identified UI reference sheets per key screen
+  (layout hierarchy, spacing, typography, interactions, rationale) plus a full
+  design system (`colors`, `typography`, `spacing`, `animation-guidelines`,
+  `component-guidelines`) derived from uploaded references when present,
+  otherwise platform defaults explicitly marked as defaults. Manifests link
+  matching UI references per feature.
+- **Selective regeneration** (`src/contextforge/regenerate.ts` +
+  `POST /api/contextforge/regenerate`): edit the spec and confirm again - only
+  affected generators re-run (changed stack entries swap their skill packages,
+  added features get new prompts/manifests); unrelated files carry over
+  byte-for-byte. `projectSpecVersion` and `packageVersion` bump automatically.
+- **Registry buildout**: hosting category (Vercel, Netlify, Railway) plus
+  Auth0, Neon, Lemon Squeezy, Plausible, SendGrid.
+- **Templates expansion**: hook, service, repository and test templates.
+- **Image upload**: `POST /api/contextforge/upload` stores design references
+  in the Supabase `design-references` bucket; URLs flow into the ProjectSpec.
+- **Stripe paywall scaffold**: `POST /api/billing/checkout` (Checkout session)
+  and `POST /api/billing/webhook` (signature-verified, records subscriptions).
+- **Dashboard** (`/dashboard`): lists saved packages with both versions.
+
+### Subscriptions schema
+
+```sql
+create table subscriptions (
+  user_id text primary key,
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  status text not null,
+  created_at timestamptz not null default now()
+);
+```
+
+## Remaining for Phase 3
+
+Registry admin panel UI, plan enforcement on generation limits, and loading a
+saved package back into the wizard for regeneration from the dashboard.
