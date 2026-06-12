@@ -1,285 +1,427 @@
 "use client";
 
+import JSZip from "jszip";
 import { useState } from "react";
-import type { Analysis, Budget, Category, Platform, Recommendation } from "../types";
+import type {
+  DraftInput,
+  PackageMeta,
+  ProjectSpec,
+  StackEntry,
+  SuggestionCandidate,
+} from "../types/projectspec";
 
-const PLATFORMS: Array<{ value: Platform; label: string }> = [
-  { value: "web", label: "Web app" },
-  { value: "mobile", label: "Mobile app" },
-  { value: "backend", label: "Backend / API" },
-  { value: "saas", label: "SaaS" },
-  { value: "chrome-extension", label: "Chrome extension" },
-  { value: "agentic", label: "AI / agentic system" },
+const PLATFORMS = [
+  { value: "web", label: "Web" },
+  { value: "mobile-ios-android", label: "Mobile (iOS + Android)" },
+  { value: "ios", label: "Mobile (iOS only)" },
+  { value: "android", label: "Mobile (Android only)" },
+  { value: "desktop", label: "Desktop" },
+  { value: "browser-extension", label: "Browser Extension" },
+  { value: "backend-only", label: "Backend-only" },
+  { value: "cli", label: "CLI" },
 ];
 
-const BUDGETS: Array<{ value: Budget; label: string }> = [
-  { value: "free-only", label: "Free tools only" },
-  { value: "low", label: "Low budget" },
-  { value: "flexible", label: "Flexible" },
+const FEATURE_PRESETS = [
+  "Authentication",
+  "Onboarding",
+  "Dashboard",
+  "AI Chat",
+  "Video Lessons",
+  "Payments",
+  "User Profiles",
+  "Notifications",
 ];
 
-function splitList(value: string): string[] {
-  return value
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
+type Mode = "own" | "suggest" | "none";
+
+interface CategoryDecision {
+  mode: Mode;
+  ownValue: string;
+  suggestions: SuggestionCandidate[] | null;
+  suggestionsTier: "registry" | "community" | null;
+  chosen: SuggestionCandidate | null;
+  loading: boolean;
+}
+
+function split(value: string): string[] {
+  return value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
 }
 
 export default function Home() {
-  const [step, setStep] = useState<"intake" | "review">("intake");
-  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: "",
-    description: "",
-    platform: "web" as Platform,
-    targetUsers: "",
-    budget: "free-only" as Budget,
-    preferredTechnologies: "",
-    features: "",
-    designInspirations: "",
-  });
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [selections, setSelections] = useState<Partial<Record<Category, string>>>({});
+  const [busy, setBusy] = useState(false);
 
-  const buildInput = () => ({
-    name: form.name,
-    description: form.description,
-    platform: form.platform,
-    targetUsers: form.targetUsers,
-    budget: form.budget,
-    preferredTechnologies: splitList(form.preferredTechnologies),
-    features: splitList(form.features),
-    designInspirations: splitList(form.designInspirations),
+  // Step 1
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [platform, setPlatform] = useState("web");
+  // Step 2
+  const [features, setFeatures] = useState<string[]>([]);
+  const [otherFeatures, setOtherFeatures] = useState("");
+  // Step 3
+  const [categories, setCategories] = useState<string[]>([]);
+  const [engine, setEngine] = useState<"claude" | "heuristic" | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, CategoryDecision>>({});
+  // Step 4
+  const [budget, setBudget] = useState("");
+  const [avoid, setAvoid] = useState("");
+  // Step 5
+  const [designRefs, setDesignRefs] = useState("");
+  // Step 6
+  const [generated, setGenerated] = useState<{ count: number; meta: PackageMeta } | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [lastSpec, setLastSpec] = useState<ProjectSpec | null>(null);
+
+  const allFeatures = () => [...features, ...split(otherFeatures)];
+
+  const draft = (): DraftInput => ({
+    projectName: name,
+    description,
+    platform,
+    features: allFeatures(),
+    constraints: { budget: budget || undefined, avoid: split(avoid) },
+    designReferences: split(designRefs),
   });
 
-  async function handleAnalyze(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+  async function runDiscovery() {
+    setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/analyze", {
+      const res = await fetch("/api/contextforge/discover", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(buildInput()),
+        body: JSON.stringify(draft()),
       });
-      if (!res.ok) throw new Error("Analysis failed. Check your inputs and try again.");
+      if (!res.ok) throw new Error("Category discovery failed.");
       const data = (await res.json()) as {
-        analysis: Analysis;
-        recommendations: Recommendation[];
+        requiredCategories: string[];
+        engine: "claude" | "heuristic";
       };
-      setAnalysis(data.analysis);
-      setRecommendations(data.recommendations);
-      setSelections(
-        Object.fromEntries(data.recommendations.map((r) => [r.category, r.primary.id])),
+      setCategories(data.requiredCategories);
+      setEngine(data.engine);
+      setDecisions(
+        Object.fromEntries(
+          data.requiredCategories.map((c) => [
+            c,
+            { mode: "own" as Mode, ownValue: "", suggestions: null, suggestionsTier: null, chosen: null, loading: false },
+          ]),
+        ),
       );
-      setStep("review");
+      setStep(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }
 
-  async function handleGenerate() {
-    if (!analysis) return;
-    setLoading(true);
+  function updateDecision(category: string, patch: Partial<CategoryDecision>) {
+    setDecisions((d) => ({ ...d, [category]: { ...d[category], ...patch } }));
+  }
+
+  async function fetchSuggestions(category: string) {
+    updateDecision(category, { loading: true });
     setError(null);
     try {
-      const res = await fetch("/api/generate", {
+      const res = await fetch("/api/contextforge/suggest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ input: buildInput(), analysis, selections }),
+        body: JSON.stringify({ category, draft: draft() }),
       });
-      if (!res.ok) throw new Error("Package generation failed. Please try again.");
-      const blob = await res.blob();
+      if (!res.ok) throw new Error(`Suggestions failed for ${category}.`);
+      const data = (await res.json()) as {
+        tier: "registry" | "community";
+        candidates: SuggestionCandidate[];
+      };
+      updateDecision(category, {
+        suggestions: data.candidates,
+        suggestionsTier: data.tier,
+        loading: false,
+      });
+    } catch (err) {
+      updateDecision(category, { loading: false });
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
+  }
+
+  function stackResolved(): boolean {
+    return categories.every((c) => {
+      const d = decisions[c];
+      if (!d) return false;
+      if (d.mode === "none") return true;
+      if (d.mode === "own") return d.ownValue.trim().length > 0;
+      return d.chosen !== null;
+    });
+  }
+
+  function buildStack(): Record<string, StackEntry> {
+    const stack: Record<string, StackEntry> = {};
+    for (const c of categories) {
+      const d = decisions[c];
+      if (d.mode === "none") stack[c] = { value: null, source: "user" };
+      else if (d.mode === "own") stack[c] = { value: d.ownValue.trim(), source: "user" };
+      else if (d.chosen)
+        stack[c] = { value: d.chosen.name, source: d.chosen.source, confidence: d.chosen.confidence };
+    }
+    return stack;
+  }
+
+  async function confirmAndGenerate() {
+    setBusy(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const spec: ProjectSpec = {
+        id: crypto.randomUUID(),
+        ...draft(),
+        requiredCategories: categories,
+        stack: buildStack(),
+        projectSpecVersion: "1.0.0",
+      };
+      const res = await fetch("/api/contextforge/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(spec),
+      });
+      if (!res.ok) throw new Error("Package generation failed.");
+      const data = (await res.json()) as { files: Record<string, string>; meta: PackageMeta };
+
+      const zip = new JSZip();
+      for (const [path, content] of Object.entries(data.files)) {
+        zip.file(`project-package/${path}`, content);
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${form.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-ai-context-package.zip`;
+      a.download = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-context-package.zip`;
       a.click();
       URL.revokeObjectURL(url);
+
+      setGenerated({ count: Object.keys(data.files).length, meta: data.meta });
+      setLastSpec(spec);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }
 
-  const inputClass =
+  async function saveToAccount() {
+    if (!lastSpec || !generated) return;
+    setSaveMessage(null);
+    const res = await fetch("/api/contextforge/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spec: lastSpec, meta: generated.meta }),
+    });
+    const data = (await res.json()) as { saved?: boolean; error?: string };
+    setSaveMessage(data.saved ? "Saved to your account." : data.error ?? "Save failed.");
+  }
+
+  const input =
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none";
-  const labelClass = "mb-1 block text-sm font-medium text-slate-700";
+  const label = "mb-1 block text-sm font-medium text-slate-700";
+  const btn =
+    "rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50";
+  const btnGhost =
+    "rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100";
+  const card = "rounded-xl border border-slate-200 bg-white p-5";
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-bold">AI Project Context Generator</h1>
+      <h1 className="text-3xl font-bold">ContextForge</h1>
       <p className="mt-2 text-slate-600">
-        Describe your application and download a complete AI context package:
-        agents.md, prompts, skills, templates, ADRs, roadmap and setup scripts.
+        Generate a versioned AI context package - the persistent memory layer your AI
+        coding assistants read so they stay architecturally consistent.
+      </p>
+      <p className="mt-4 text-xs font-medium uppercase tracking-wide text-slate-400">
+        Step {step} of 6
       </p>
 
       {error && (
-        <div className="mt-6 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {step === "intake" && (
-        <form onSubmit={handleAnalyze} className="mt-8 space-y-4">
+      {step === 1 && (
+        <div className="mt-6 space-y-4">
           <div>
-            <label className={labelClass}>Project name *</label>
-            <input
-              required
-              className={inputClass}
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="LingoQuest"
-            />
+            <label className={label}>Project name *</label>
+            <input className={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="LingoQuest" />
           </div>
           <div>
-            <label className={labelClass}>Description *</label>
-            <textarea
-              required
-              minLength={10}
-              rows={4}
-              className={inputClass}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="A Duolingo-inspired language learning app with an AI chat tutor, video lessons and XP progression..."
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelClass}>Platform</label>
-              <select
-                className={inputClass}
-                value={form.platform}
-                onChange={(e) => setForm({ ...form, platform: e.target.value as Platform })}
-              >
-                {PLATFORMS.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={labelClass}>Budget</label>
-              <select
-                className={inputClass}
-                value={form.budget}
-                onChange={(e) => setForm({ ...form, budget: e.target.value as Budget })}
-              >
-                {BUDGETS.map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <label className={label}>Description *</label>
+            <textarea rows={4} className={input} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A Duolingo-inspired language learning app with an AI chat tutor, video lessons and XP progression..." />
           </div>
           <div>
-            <label className={labelClass}>Target users</label>
-            <input
-              className={inputClass}
-              value={form.targetUsers}
-              onChange={(e) => setForm({ ...form, targetUsers: e.target.value })}
-              placeholder="Language learners aged 16-35"
-            />
+            <label className={label}>Platform</label>
+            <select className={input} value={platform} onChange={(e) => setPlatform(e.target.value)}>
+              {PLATFORMS.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
           </div>
-          <div>
-            <label className={labelClass}>Preferred technologies (comma separated)</label>
-            <input
-              className={inputClass}
-              value={form.preferredTechnologies}
-              onChange={(e) => setForm({ ...form, preferredTechnologies: e.target.value })}
-              placeholder="expo, clerk, zustand"
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Desired features (comma separated)</label>
-            <input
-              className={inputClass}
-              value={form.features}
-              onChange={(e) => setForm({ ...form, features: e.target.value })}
-              placeholder="AI chat tutor, video lessons, XP progression"
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Design inspirations (comma separated URLs)</label>
-            <input
-              className={inputClass}
-              value={form.designInspirations}
-              onChange={(e) => setForm({ ...form, designInspirations: e.target.value })}
-              placeholder="https://duolingo.com"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {loading ? "Analyzing..." : "Analyze project"}
+          <button className={btn} disabled={!name.trim() || description.trim().length < 10} onClick={() => setStep(2)}>
+            Next: Features
           </button>
-        </form>
+        </div>
       )}
 
-      {step === "review" && analysis && (
-        <div className="mt-8 space-y-6">
-          <section className="rounded-xl border border-slate-200 bg-white p-5">
-            <h2 className="text-lg font-semibold">Analysis</h2>
-            <p className="mt-2 text-sm text-slate-600">{analysis.purpose}</p>
-            <p className="mt-2 text-sm">
-              <span className="font-medium">Complexity:</span> {analysis.complexity}
-            </p>
-            <p className="mt-1 text-sm">
-              <span className="font-medium">Architecture:</span> {analysis.architecture}
-            </p>
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-5">
-            <h2 className="text-lg font-semibold">Recommended stack</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Adjust any selection before generating the package.
-            </p>
-            <div className="mt-4 space-y-3">
-              {recommendations.map((rec) => (
-                <div key={rec.category} className="flex items-center gap-3">
-                  <span className="w-40 text-sm font-medium text-slate-700">
-                    {rec.category}
-                  </span>
-                  <select
-                    className={inputClass}
-                    value={selections[rec.category] ?? rec.primary.id}
+      {step === 2 && (
+        <div className="mt-6 space-y-4">
+          <div className={card}>
+            <p className="text-sm font-medium text-slate-700">Select features</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {FEATURE_PRESETS.map((f) => (
+                <label key={f} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={features.includes(f)}
                     onChange={(e) =>
-                      setSelections({ ...selections, [rec.category]: e.target.value })
+                      setFeatures(e.target.checked ? [...features, f] : features.filter((x) => x !== f))
                     }
-                  >
-                    {[rec.primary, ...rec.alternatives].map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} {t.freeTier ? "(free tier)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  />
+                  {f}
+                </label>
               ))}
             </div>
-          </section>
-
+            <div className="mt-4">
+              <label className={label}>Other features (comma separated)</label>
+              <input className={input} value={otherFeatures} onChange={(e) => setOtherFeatures(e.target.value)} placeholder="XP progression, streak tracking" />
+            </div>
+          </div>
           <div className="flex gap-3">
-            <button
-              onClick={() => setStep("intake")}
-              className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-            >
-              Back
+            <button className={btnGhost} onClick={() => setStep(1)}>Back</button>
+            <button className={btn} disabled={busy || allFeatures().length === 0} onClick={runDiscovery}>
+              {busy ? "Discovering categories..." : "Next: Stack Decisions"}
             </button>
-            <button
-              onClick={handleGenerate}
-              disabled={loading}
-              className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {loading ? "Generating..." : "Generate package (.zip)"}
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="mt-6 space-y-4">
+          <p className="text-sm text-slate-500">
+            Categories discovered {engine === "claude" ? "by Claude" : "heuristically (AI engine not configured)"}. Your choices are final and binding for everything generated.
+          </p>
+          {categories.map((category) => {
+            const d = decisions[category];
+            return (
+              <div key={category} className={card}>
+                <p className="font-semibold">{category}</p>
+                <div className="mt-2 flex gap-4 text-sm">
+                  {(["own", "suggest", "none"] as Mode[]).map((m) => (
+                    <label key={m} className="flex items-center gap-1">
+                      <input type="radio" name={`mode-${category}`} checked={d.mode === m} onChange={() => updateDecision(category, { mode: m, chosen: null })} />
+                      {m === "own" ? "Type my own" : m === "suggest" ? "Suggest for me" : "Not needed"}
+                    </label>
+                  ))}
+                </div>
+                {d.mode === "own" && (
+                  <input className={`${input} mt-3`} value={d.ownValue} onChange={(e) => updateDecision(category, { ownValue: e.target.value })} placeholder="Tool name (any tool, any version - it will be locked exactly as typed)" />
+                )}
+                {d.mode === "suggest" && (
+                  <div className="mt-3 space-y-2">
+                    {!d.suggestions && (
+                      <button className={btnGhost} disabled={d.loading} onClick={() => fetchSuggestions(category)}>
+                        {d.loading ? "Asking..." : "Get suggestions"}
+                      </button>
+                    )}
+                    {d.suggestions?.map((c) => (
+                      <label key={c.name} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm">
+                        <input type="radio" name={`cand-${category}`} checked={d.chosen?.name === c.name} onChange={() => updateDecision(category, { chosen: c })} />
+                        <span>
+                          <span className="font-medium">{c.name}</span>
+                          {c.source === "community" && (
+                            <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">Community Suggested{c.confidence === "low" ? " - low confidence" : ""}</span>
+                          )}
+                          <span className="block text-slate-600">{c.rationale}</span>
+                          {c.pricing && <span className="block text-xs text-slate-400">{c.pricing}</span>}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="flex gap-3">
+            <button className={btnGhost} onClick={() => setStep(2)}>Back</button>
+            <button className={btn} disabled={!stackResolved()} onClick={() => setStep(4)}>Next: Constraints</button>
+          </div>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="mt-6 space-y-4">
+          <div>
+            <label className={label}>Budget</label>
+            <input className={input} value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="Free tiers only / up to $50 per month / flexible" />
+          </div>
+          <div>
+            <label className={label}>Avoid (comma separated)</label>
+            <input className={input} value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="Firebase, Redux" />
+          </div>
+          <div className="flex gap-3">
+            <button className={btnGhost} onClick={() => setStep(3)}>Back</button>
+            <button className={btn} onClick={() => setStep(5)}>Next: Design References</button>
+          </div>
+        </div>
+      )}
+
+      {step === 5 && (
+        <div className="mt-6 space-y-4">
+          <div>
+            <label className={label}>Design references (URLs or a text description, comma/newline separated)</label>
+            <textarea rows={4} className={input} value={designRefs} onChange={(e) => setDesignRefs(e.target.value)} placeholder="https://duolingo.com, playful rounded UI with bold colors" />
+            <p className="mt-1 text-xs text-slate-400">Image upload to Supabase Storage arrives in Phase 2; URLs and descriptions are included in the ProjectSpec today.</p>
+          </div>
+          <div className="flex gap-3">
+            <button className={btnGhost} onClick={() => setStep(4)}>Back</button>
+            <button className={btn} onClick={() => setStep(6)}>Next: Review &amp; Confirm</button>
+          </div>
+        </div>
+      )}
+
+      {step === 6 && (
+        <div className="mt-6 space-y-4">
+          <div className={card}>
+            <h2 className="text-lg font-semibold">Draft ProjectSpec</h2>
+            <dl className="mt-3 space-y-2 text-sm">
+              <div><dt className="font-medium">Project</dt><dd>{name} ({platform})</dd></div>
+              <div><dt className="font-medium">Description</dt><dd>{description}</dd></div>
+              <div><dt className="font-medium">Features</dt><dd>{allFeatures().join(", ")}</dd></div>
+              <div>
+                <dt className="font-medium">Stack (will be LOCKED at v1.0.0)</dt>
+                <dd>
+                  <ul className="mt-1 list-disc pl-5">
+                    {categories.map((c) => {
+                      const d = decisions[c];
+                      const text = d.mode === "none" ? "not needed" : d.mode === "own" ? `${d.ownValue} (user)` : `${d.chosen?.name} (${d.chosen?.source}${d.chosen?.confidence === "low" ? ", low confidence" : ""})`;
+                      return <li key={c}><span className="font-medium">{c}:</span> {text}</li>;
+                    })}
+                  </ul>
+                </dd>
+              </div>
+              {budget && <div><dt className="font-medium">Budget</dt><dd>{budget}</dd></div>}
+              {split(avoid).length > 0 && <div><dt className="font-medium">Avoid</dt><dd>{split(avoid).join(", ")}</dd></div>}
+              {split(designRefs).length > 0 && <div><dt className="font-medium">Design references</dt><dd>{split(designRefs).join(", ")}</dd></div>}
+            </dl>
+          </div>
+          {generated && (
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
+              Generated {generated.count} files (packageVersion {generated.meta.packageVersion}, projectSpecVersion {generated.meta.projectSpecVersion}). ZIP downloaded.
+              <button className="ml-3 underline" onClick={saveToAccount}>Save to account</button>
+              {saveMessage && <span className="ml-2">{saveMessage}</span>}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button className={btnGhost} onClick={() => setStep(5)}>Back</button>
+            <button className={btn} disabled={busy} onClick={confirmAndGenerate}>
+              {busy ? "Finalizing spec and generating..." : "Confirm, lock spec & generate package"}
             </button>
           </div>
         </div>

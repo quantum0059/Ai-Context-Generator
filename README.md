@@ -1,13 +1,35 @@
-# AI Project Context Generator
+# ContextForge
 
-Generates a complete, downloadable **AI context package** for a software
-project: `agents.md`, feature prompts, technology skill files, code templates,
-architecture decision records, a roadmap, design references and install
-scripts. Feed the package to any AI coding assistant (ChatGPT, Claude, Cursor,
-Gemini) to get consistent, architecture-aligned code generation.
+ContextForge generates a complete, versioned **AI development context package**
+for your project - a long-term memory layer you feed to AI coding assistants
+(Claude, Cursor, ChatGPT, Gemini, Codex) so they stay architecturally
+consistent across the entire project lifecycle.
 
-The app does **not** generate application code. It generates the context
-artifacts that guide AI assistants.
+ContextForge does **not** generate application code, and it does **not** impose
+a tech stack. Your choices (typed directly or confirmed from suggestions) are
+final and binding for everything generated.
+
+## The ProjectSpec pipeline (single source of truth)
+
+```
+User Input
+  -> Draft ProjectSpec
+  -> Dynamic Category Discovery   (Claude determines required categories)
+  -> Suggestion Resolution        (hybrid: registry tier 1 / community tier 2)
+  -> User Confirmation            (review step; spec locked at 1.0.0)
+  -> Finalized ProjectSpec        (validated, versioned, immutable)
+  -> Generators                   (all read the SAME finalized spec)
+  -> Package Assembly             (No Generic Content check)
+  -> ZIP download (client-side JSZip) / Supabase save (Clerk users)
+```
+
+Hard rules implemented in code:
+- Generators **never** infer or choose technologies; they only read
+  `stack[category].value` from the finalized spec.
+- Technology selection happens exactly once, during Suggestion Resolution.
+- Low-confidence (community-suggested) tools propagate explicit
+  "verify against current docs" warnings into every generated skill file
+  and into the `Low-Confidence Areas` section of `agents.md`.
 
 ## Quick start
 
@@ -16,58 +38,65 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000, describe your project, review the recommended
-stack, and download the generated `.zip` package.
+Open http://localhost:3000 and walk the 6-step wizard. The app runs with zero
+configuration (heuristic fallbacks); add keys from `.env.example` to enable:
 
-## Environment variables (optional)
-
-The app works fully offline using a heuristic analyzer. Configure an LLM to
-enhance the analysis step:
-
-| Variable | Description |
+| Variable | Enables |
 | --- | --- |
-| `LLM_PROVIDER` | `openai` or `anthropic` (default: `openai`) |
-| `LLM_API_KEY` | API key for the chosen provider |
-| `LLM_MODEL` | Optional model override |
+| `ANTHROPIC_API_KEY` | Claude-powered discovery, suggestions, aspects, dependency ordering |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` | Sign-in and package saving |
+| `NEXT_PUBLIC_SUPABASE_URL` + keys | Persistence of saved ProjectSpecs/packages |
 
-Copy `.env.example` to `.env` and fill in values.
+### Supabase schema
+
+```sql
+create table context_packages (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  spec_id text not null,
+  project_name text not null,
+  spec jsonb not null,
+  package_version text not null,
+  project_spec_version text not null,
+  generated_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+```
+
+## Generated package contents
+
+`README.md`, `agents.md` (AI constitution with LOCKED stack), `ai-context.json`,
+`package-meta.json` (packageVersion + projectSpecVersion), `roadmap.md`,
+`resources.md`, `dependency-graph.md`, `prompts/<feature>/build-<feature>-<aspect>.md`,
+`skills/<technology>/` (skill, install, examples, env-vars, common-mistakes),
+`templates/`, `decisions/` (one ADR per locked category),
+`context-manifests/<feature>.json` (exactly which files to load per feature),
+`setup/` (install.sh, install.ps1, setup-guide.md).
 
 ## Architecture
 
 ```
 src/
-├── app/                  # Next.js App Router UI + API routes
-│   ├── page.tsx          # Intake form -> review -> generate flow
-│   └── api/
-│       ├── analyze/      # POST: analysis + recommendations
-│       └── generate/     # POST: builds and streams the .zip package
-├── registry/
-│   ├── technologies.ts   # Single source of truth for all supported tools
-│   └── profiles.ts       # Platform profiles + keyword-to-category triggers
-├── generators/           # Composable package generators
-│   ├── analyzer.ts       # Heuristic + optional LLM project analysis
-│   ├── recommender.ts    # Registry-driven recommendation engine
-│   ├── agentsGenerator.ts
-│   ├── promptGenerator.ts
-│   ├── skillGenerator.ts
-│   ├── decisionGenerator.ts
-│   ├── templateGenerator.ts
-│   ├── roadmapGenerator.ts
-│   ├── installGenerator.ts
-│   ├── contextGenerator.ts
-│   ├── promptMaterialGenerator.ts
-│   └── packageBuilder.ts # Assembles everything into a file map
-├── lib/
-│   ├── llm/adapter.ts    # Provider-agnostic LLM adapter (OpenAI/Anthropic)
-│   └── schemas.ts        # zod request validation
-└── types/                # Shared TypeScript types
+|- app/                      # 6-step wizard UI + API routes
+|  |- api/contextforge/
+|     |- discover/           # POST: dynamic category discovery
+|     |- suggest/            # POST: hybrid suggestion resolution (cached)
+|     |- generate/           # POST: finalized spec -> file map (+ meta)
+|     |- save/               # POST: Supabase save for Clerk users
+|- contextforge/
+|  |- spec.ts                # zod schemas + finalizeProjectSpec (freeze + validate)
+|  |- discovery.ts           # Claude discovery + heuristic fallback
+|  |- suggestions.ts         # Tier 1 registry / Tier 2 community + TTL cache
+|  |- registry.ts            # technology_registry view + category aliases
+|  |- assembler.ts           # parallel generators + No Generic Content check
+|  |- generators/            # agents, skills, prompts, decisions, manifests,
+|                            # dependencyGraph, docs (meta/context/resources/
+|                            # roadmap/readme/templates/setup), shared helpers
+|- lib/                      # claude.ts (schema-validated JSON + retries),
+|                            # cache.ts, supabase.ts
+|- registry/technologies.ts  # seed registry data
+|- types/projectspec.ts      # ProjectSpec and package types
 ```
-
-### Extending the registry
-
-Adding a new technology requires **only** a new entry in
-`src/registry/technologies.ts`. It automatically appears in recommendations,
-skill files, ADRs, resources and install scripts.
 
 ## Testing
 
@@ -75,5 +104,13 @@ skill files, ADRs, resources and install scripts.
 npm test
 ```
 
-Unit tests cover the registry integrity, the recommendation engine and the
-package builder.
+Covers: heuristic discovery, tier 1/tier 2 suggestion resolution, spec
+finalization (validation + immutability), full package assembly, low-confidence
+warning propagation, manifest correctness, and the No Generic Content rule.
+
+## MVP scope and Phase 2
+
+Deferred to Phase 2 (data model already supports them): `prompt_material/`
+design-system and UI references, regeneration/versioning UI (selective
+generator re-runs on spec edits), registry admin panel, Stripe paywall,
+image upload to Supabase Storage.
