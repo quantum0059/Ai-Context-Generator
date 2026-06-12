@@ -1,0 +1,77 @@
+import { z } from "zod";
+import { claudeJson, isClaudeConfigured } from "../../lib/claude";
+import type { ProjectSpec } from "../../types/projectspec";
+
+const orderSchema = z.object({
+  ordered: z.array(z.object({ feature: z.string(), reason: z.string() })).min(1),
+});
+
+const PRIORITY: Array<{ keywords: string[]; weight: number; reason: string }> = [
+  { keywords: ["auth", "login", "signup"], weight: 0, reason: "Most features depend on knowing who the user is." },
+  { keywords: ["profile", "user", "account"], weight: 1, reason: "User data structures build directly on authentication." },
+  { keywords: ["onboard"], weight: 2, reason: "Onboarding requires auth and user profiles to exist." },
+  { keywords: ["ai", "chat", "tutor"], weight: 6, reason: "AI features integrate on top of the core experience." },
+  { keywords: ["video", "lesson"], weight: 6, reason: "Media features integrate on top of the core experience." },
+  { keywords: ["payment", "billing", "subscription"], weight: 8, reason: "Monetization should land after the core product works." },
+  { keywords: ["admin", "analytics"], weight: 9, reason: "Operational tooling comes last." },
+];
+
+function heuristicOrder(spec: ProjectSpec): Array<{ feature: string; reason: string }> {
+  const scored = spec.features.map((feature, index) => {
+    const text = feature.toLowerCase();
+    const hit = PRIORITY.find((p) => p.keywords.some((k) => text.includes(k)));
+    return {
+      feature,
+      reason: hit?.reason ?? "Core feature; ordered by logical build sequence.",
+      weight: hit?.weight ?? 4,
+      index,
+    };
+  });
+  scored.sort((a, b) => a.weight - b.weight || a.index - b.index);
+  return scored.map(({ feature, reason }) => ({ feature, reason }));
+}
+
+/** Claude-derived feature ordering by logical dependency (Section 11). */
+export async function orderFeatures(
+  spec: ProjectSpec,
+): Promise<Array<{ feature: string; reason: string }>> {
+  if (spec.features.length === 0) return [];
+  if (isClaudeConfigured()) {
+    try {
+      const r = await claudeJson(
+        `Order these features of project \"${spec.projectName}\" (${spec.platform}) by logical build dependency - what must exist before what. Features: ${spec.features.join("; ")}.\n` +
+          `Return JSON: {"ordered":[{"feature":"<exact feature text>","reason":"..."}]} containing every feature exactly once.`,
+        orderSchema,
+      );
+      const valid = r.ordered.filter((o) =>
+        spec.features.some((f) => f.toLowerCase() === o.feature.toLowerCase()),
+      );
+      if (valid.length === spec.features.length) return valid;
+    } catch {
+      // fall through
+    }
+  }
+  return heuristicOrder(spec);
+}
+
+export function generateDependencyGraph(
+  spec: ProjectSpec,
+  ordered: Array<{ feature: string; reason: string }>,
+): string {
+  const chain = ordered.map((o) => o.feature).join(" -> ") || "No features listed";
+  const detail = ordered
+    .map((o, i) => `${i + 1}. **${o.feature}** - ${o.reason}`)
+    .join("\n");
+  return `# Dependency Graph: ${spec.projectName}
+
+Build order derived from logical feature dependencies. This ordering directly
+determines the phase sequence in \`roadmap.md\`.
+
+\`\`\`
+${chain}
+\`\`\`
+
+## Ordering rationale
+${detail || "_No features were specified in the ProjectSpec._"}
+`;
+}
