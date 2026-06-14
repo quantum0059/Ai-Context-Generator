@@ -1,7 +1,7 @@
 "use client";
 
 import JSZip from "jszip";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type {
   DraftInput,
   PackageMeta,
@@ -74,6 +74,7 @@ export default function Home() {
   const [lastSpec, setLastSpec] = useState<ProjectSpec | null>(null);
   const [lastFiles, setLastFiles] = useState<Record<string, string> | null>(null);
   const [regenInfo, setRegenInfo] = useState<{ changed: number; removed: number } | null>(null);
+  const [loadedSavedPackage, setLoadedSavedPackage] = useState(false);
   const [uploadedRefs, setUploadedRefs] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -87,6 +88,114 @@ export default function Home() {
     constraints: { budget: budget || undefined, avoid: split(avoid) },
     designReferences: [...split(designRefs), ...uploadedRefs],
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("mode") !== "regenerate") return;
+
+    const saved = sessionStorage.getItem("contextforge_load_package");
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed?.spec) {
+        void loadSavedPackage(parsed.spec);
+      }
+    } catch {
+      // ignore malformed load payload
+    } finally {
+      window.history.replaceState({}, "", window.location.pathname);
+      sessionStorage.removeItem("contextforge_load_package");
+    }
+  }, []);
+
+  async function loadSavedPackage(spec: ProjectSpec) {
+    setBusy(true);
+    setError(null);
+    try {
+      setName(spec.projectName);
+      setDescription(spec.description);
+      setPlatform(spec.platform);
+      setFeatures(spec.features);
+      setOtherFeatures("");
+      setBudget(spec.constraints.budget ?? "");
+      setAvoid((spec.constraints.avoid ?? []).join(", "));
+      setDesignRefs((spec.designReferences ?? []).join("\n"));
+      setCategories(spec.requiredCategories);
+      setDecisions(
+        Object.fromEntries(
+          spec.requiredCategories.map((category) => {
+            const entry = spec.stack[category];
+            if (!entry || entry.value === null) {
+              return [
+                category,
+                {
+                  mode: "none" as Mode,
+                  ownValue: "",
+                  suggestions: null,
+                  suggestionsTier: null,
+                  chosen: null,
+                  loading: false,
+                },
+              ];
+            }
+
+            if (entry.source === "user") {
+              return [
+                category,
+                {
+                  mode: "own" as Mode,
+                  ownValue: entry.value,
+                  suggestions: null,
+                  suggestionsTier: null,
+                  chosen: null,
+                  loading: false,
+                },
+              ];
+            }
+
+            const chosen: SuggestionCandidate = {
+              name: entry.value,
+              rationale: "Loaded from saved package",
+              source: entry.source,
+              confidence: entry.confidence ?? "high",
+            };
+            return [
+              category,
+              {
+                mode: "suggest" as Mode,
+                ownValue: "",
+                suggestions: [chosen],
+                suggestionsTier: "registry",
+                chosen,
+                loading: false,
+              },
+            ];
+          }),
+        ),
+      );
+      setLastSpec(spec);
+      setLoadedSavedPackage(true);
+      setStep(6);
+
+      const res = await fetch("/api/contextforge/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(spec),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { files?: Record<string, string>; meta?: PackageMeta };
+        if (data.files) {
+          setLastFiles(data.files);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load saved package");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function uploadImage(file: File) {
     setUploading(true);

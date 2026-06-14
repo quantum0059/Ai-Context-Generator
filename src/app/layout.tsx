@@ -1,6 +1,11 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import "./globals.css";
+import { Inter } from "next/font/google";
+import Navbar from "@/components/layout/navbar";
+import { cn } from "@/lib/utils";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "ContextForge",
@@ -16,8 +21,9 @@ export default function RootLayout({
   const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
   const app = (
-    <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+    <html lang="en" className={cn("font-sans", inter.variable)}>
+      <body className="min-h-screen bg-background text-foreground antialiased">
+        <Navbar />
         {children}
       </body>
     </html>
