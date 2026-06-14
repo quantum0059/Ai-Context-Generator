@@ -103,4 +103,16 @@ describe("projectspec finalization and package assembly", () => {
     expect(files["agents.md"]).toContain("NovelAI Engine X");
     expect(files["agents.md"]).toContain("Low-Confidence Areas");
   });
+
+  it("generates platform-specific install commands for mobile", async () => {
+    const spec = finalizeProjectSpec(draft, categories, stack);
+    const { files } = await assemblePackage(spec);
+
+    // Clerk install should use @clerk/clerk-expo for mobile platform, not @clerk/nextjs
+    const clerkInstall = files["skills/clerk/install.md"];
+    expect(clerkInstall).toContain("@clerk/clerk-expo");
+    expect(clerkInstall).toContain("expo-web-browser");
+    expect(clerkInstall).toContain("expo-secure-store");
+    expect(clerkInstall).not.toContain("@clerk/nextjs");
+  });
 });

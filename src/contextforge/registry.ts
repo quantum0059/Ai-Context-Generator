@@ -8,6 +8,8 @@ export interface RegistryEntry {
   pricing: string;
   freeTier: string;
   installCommands: string[];
+  /** Platform-specific install commands override. Key is platform name, value is install command array. */
+  platformInstallCommands?: Partial<Record<string, string[]>>;
   pros: string[];
   cons: string[];
   envVars: string[];
@@ -52,6 +54,7 @@ export const REGISTRY: RegistryEntry[] = TECHNOLOGIES.map((t) => ({
   pricing: t.pricing,
   freeTier: t.freeTier ? "Yes" : "No",
   installCommands: t.installCommands,
+  platformInstallCommands: t.platformInstallCommands,
   pros: t.pros,
   cons: t.cons,
   envVars: t.envVars,

@@ -1,27 +1,81 @@
-import { getSupabase } from "../../../../lib/supabase";
+import { getSupabase, isClerkConfigured } from "../../../../lib/supabase";
+import { checkRateLimit, getRateLimitIdentifier } from "../../../../lib/rateLimit";
+import { validateUpload, verifyFileContent } from "../../../../lib/uploadValidation";
 
-/** Uploads a design reference image to Supabase Storage; returns its public URL. */
+/**
+ * Upload design reference images to Supabase storage.
+ * 
+ * Validates:
+ * - File size (max 5MB)
+ * - File type (images only)
+ * - File content (magic number verification)
+ * - Rate limiting (10 uploads per minute)
+ */
 export async function POST(req: Request) {
+  if (!isClerkConfigured()) {
+    return Response.json({ error: "Clerk is not configured." }, { status: 503 });
+  }
+
   const supabase = getSupabase();
   if (!supabase) {
+    return Response.json({ error: "Supabase is not configured." }, { status: 503 });
+  }
+
+  // Rate limiting
+  const identifier = getRateLimitIdentifier(req);
+  const rateLimit = checkRateLimit(identifier, "/api/contextforge/upload");
+
+  if (!rateLimit.allowed) {
     return Response.json(
-      { error: "Image upload requires Supabase to be configured (see README)." },
-      { status: 503 },
+      {
+        error: "Rate limit exceeded. Please wait before making another request.",
+        retryAfter: rateLimit.resetAt,
+      },
+      { status: 429 },
     );
   }
-  const form = await req.formData();
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return Response.json({ error: "Provide a 'file' form field." }, { status: 400 });
+
+  try {
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+
+    if (!file) {
+      return Response.json({ error: "No file provided." }, { status: 400 });
+    }
+
+    // Validate file metadata
+    const validation = validateUpload(file);
+    if (!validation.valid) {
+      return Response.json({ error: validation.error }, { status: 400 });
+    }
+
+    // Verify file content
+    const contentValidation = await verifyFileContent(file);
+    if (!contentValidation.valid) {
+      return Response.json({ error: contentValidation.error }, { status: 400 });
+    }
+
+    // Upload to Supabase
+    const fileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+    const { data, error } = await supabase.storage
+      .from("design-references")
+      .upload(fileName, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (error) {
+      return Response.json({ error: error.message }, { status: 500 });
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from("design-references")
+      .getPublicUrl(data.path);
+
+    return Response.json({ url: urlData.publicUrl });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Upload failed";
+    return Response.json({ error: message }, { status: 500 });
   }
-  if (!file.type.startsWith("image/")) {
-    return Response.json({ error: "Only image uploads are allowed." }, { status: 400 });
-  }
-  const path = `${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9.-]+/g, "-")}`;
-  const { error } = await supabase.storage
-    .from("design-references")
-    .upload(path, file, { contentType: file.type });
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-  const { data } = supabase.storage.from("design-references").getPublicUrl(path);
-  return Response.json({ url: data.publicUrl });
 }

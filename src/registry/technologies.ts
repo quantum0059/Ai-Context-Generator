@@ -94,6 +94,11 @@ export const TECHNOLOGIES: Technology[] = [
     pros: ["Best-in-class DX", "Prebuilt components", "MFA, orgs, social login"],
     cons: ["Vendor lock-in", "Costs grow with MAU"],
     installCommands: ["npm install @clerk/nextjs"],
+    platformInstallCommands: {
+      mobile: ["npm install @clerk/clerk-expo expo-web-browser expo-secure-store"],
+      web: ["npm install @clerk/nextjs"],
+      saas: ["npm install @clerk/nextjs"],
+    },
     envVars: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
     platforms: ["web", "mobile", "saas"],
     priority: 1,

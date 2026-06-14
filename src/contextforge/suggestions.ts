@@ -109,7 +109,7 @@ export async function suggestForCategory(
           rationale: c.rationale,
           docsUrl: c.docsUrl,
           source: "community" as const,
-          confidence: c.confidence,
+          confidence: c.confidence ?? "low",
         })),
       };
     } catch {

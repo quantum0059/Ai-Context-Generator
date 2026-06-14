@@ -34,6 +34,8 @@ export interface Technology {
   pros: string[];
   cons: string[];
   installCommands: string[];
+  /** Platform-specific install commands override. Key is platform name, value is install command array. */
+  platformInstallCommands?: Partial<Record<string, string[]>>;
   envVars: string[];
   platforms: Platform[];
   /** Lower number = higher preference within a category. */

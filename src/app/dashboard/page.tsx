@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 interface SavedPackage {
@@ -12,9 +13,11 @@ interface SavedPackage {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [packages, setPackages] = useState<SavedPackage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [billingMessage, setBillingMessage] = useState<string | null>(null);
+  const [loadingPackage, setLoadingPackage] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -31,6 +34,42 @@ export default function Dashboard() {
     const data = (await res.json()) as { url?: string; error?: string };
     if (res.ok && data.url) window.location.href = data.url;
     else setBillingMessage(data.error ?? "Checkout unavailable.");
+  }
+
+  async function loadPackage(packageId: string) {
+    setLoadingPackage(packageId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/contextforge/packages/${packageId}`);
+      const data = (await res.json()) as { package?: any; error?: string };
+      if (!res.ok || !data.package) {
+        setError(data.error ?? "Failed to load package.");
+        return;
+      }
+      // Store package data in sessionStorage for the wizard to load
+      sessionStorage.setItem("contextforge_load_package", JSON.stringify(data.package));
+      router.push("/?mode=regenerate");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load package");
+    } finally {
+      setLoadingPackage(null);
+    }
+  }
+
+  async function deletePackage(packageId: string) {
+    if (!confirm("Are you sure you want to delete this package?")) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/contextforge/packages/${packageId}`, { method: "DELETE" });
+      const data = (await res.json()) as { deleted?: boolean; error?: string };
+      if (!res.ok || !data.deleted) {
+        setError(data.error ?? "Failed to delete package.");
+        return;
+      }
+      setPackages((prev: SavedPackage[] | null) => (prev ? prev.filter((p: SavedPackage) => p.id !== packageId) : null));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete package");
+    }
   }
 
   return (
@@ -70,6 +109,7 @@ export default function Dashboard() {
               <th>Package</th>
               <th>Spec</th>
               <th>Generated</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -79,6 +119,23 @@ export default function Dashboard() {
                 <td>v{p.package_version}</td>
                 <td>v{p.project_spec_version}</td>
                 <td>{new Date(p.generated_at).toLocaleString()}</td>
+                <td className="py-2">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => loadPackage(p.id)}
+                      disabled={loadingPackage === p.id}
+                      className="rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      {loadingPackage === p.id ? "Loading..." : "Load & Edit"}
+                    </button>
+                    <button
+                      onClick={() => deletePackage(p.id)}
+                      className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

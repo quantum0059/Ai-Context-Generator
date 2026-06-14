@@ -1,6 +1,33 @@
 import { registryByName } from "../registry";
+import type { RegistryEntry } from "../registry";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { lockedEntries, lowConfidenceWarning, slugify } from "./shared";
+
+/**
+ * Gets platform-specific install commands from registry.
+ * Falls back to generic installCommands if no platform-specific override exists.
+ */
+function getInstallCommands(reg: RegistryEntry, platform: string): string {
+  const platformKey = normalizePlatform(platform);
+  const platformCommands = reg.platformInstallCommands?.[platformKey];
+  const commands = platformCommands ?? reg.installCommands;
+  return `\`\`\`bash\n${commands.join("\n")}\n\`\`\``;
+}
+
+/**
+ * Normalizes platform names to match registry keys.
+ */
+function normalizePlatform(platform: string): string {
+  if (platform.includes("mobile") || platform.includes("ios") || platform.includes("android")) {
+    return "mobile";
+  }
+  if (platform.includes("backend")) return "backend";
+  if (platform.includes("extension")) return "chrome-extension";
+  if (platform.includes("web")) return "web";
+  if (platform.includes("saas")) return "saas";
+  if (platform.includes("agentic")) return "agentic";
+  return platform;
+}
 
 /**
  * One skill package (folder of 5 files) per finalized stack entry with
@@ -30,7 +57,7 @@ ${reg ? `\n- **Docs:** ${reg.docsUrl}\n- **Pricing:** ${reg.pricing}\n- **Free t
 
     files[`skills/${slug}/install.md`] = `${warn}# Install: ${tool}
 
-${reg ? `\`\`\`bash\n${reg.installCommands.join("\n")}\n\`\`\`` : `No registry install commands available. Install ${tool} following its official documentation, and record the exact commands here once verified.`}
+${reg ? getInstallCommands(reg, spec.platform) : `No registry install commands available. Install ${tool} following its official documentation, and record the exact commands here once verified.`}
 `;
 
     files[`skills/${slug}/examples.md`] = `${warn}# Usage Patterns: ${tool} in ${spec.projectName}
