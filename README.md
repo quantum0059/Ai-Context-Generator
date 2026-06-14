@@ -142,7 +142,8 @@ create table subscriptions (
 );
 ```
 
-## Remaining for Phase 3
+## Phase 3 Completed
 
-Registry admin panel UI, plan enforcement on generation limits, and loading a
-saved package back into the wizard for regeneration from the dashboard.
+- Registry admin panel UI with local edits persisted in browser storage for admin demos.
+- Plan enforcement on generation limits: free tier limited to 5 monthly generations, Pro tier limited to 100.
+- Loading a saved package back into the wizard from the dashboard for selective regeneration.
