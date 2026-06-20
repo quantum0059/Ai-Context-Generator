@@ -63,4 +63,11 @@ export interface GitProvider {
     toBranch: string,
     title: string,
   ): Promise<{ url: string }>;
+
+  /** Best-effort branch deletion for cleanup after failed operations. */
+  deleteBranch(
+    accessToken: string,
+    repo: string,
+    branchName: string,
+  ): Promise<void>;
 }

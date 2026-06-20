@@ -1,9 +1,61 @@
+import crypto from "crypto";
 import { auth } from "@clerk/nextjs/server";
 import { isClerkConfigured, getSupabase } from "../../../../../lib/supabase";
 import { decryptToken } from "../../../../../lib/git/token-encryption";
 import { isValidProvider, getGitProvider } from "../../../../../lib/git/provider-lookup";
 import { assemblePackage } from "../../../../../contextforge/assembler";
 import type { ProjectSpec } from "../../../../../types/projectspec";
+
+/**
+ * Validates that a file path from assemblePackage() output is safe to commit.
+ * Defense-in-depth: rejects path traversal, absolute paths, backslashes, null bytes.
+ * Must be called BEFORE prefixing with .contextforge/.
+ */
+function validatePath(path: string): void {
+  if (!path) {
+    throw new Error("Path sanitization failed: empty path.");
+  }
+
+  // Reject null bytes
+  if (path.includes("\0")) {
+    throw new Error(`Path sanitization failed: null byte in path "${path}".`);
+  }
+
+  // Reject backslashes (Windows-style paths)
+  if (path.includes("\\")) {
+    throw new Error(`Path sanitization failed: backslash in path "${path}".`);
+  }
+
+  // Reject absolute paths (leading /)
+  if (path.startsWith("/")) {
+    throw new Error(`Path sanitization failed: absolute path "${path}".`);
+  }
+
+  // Reject path traversal (.. anywhere in the path segments)
+  const segments = path.split("/");
+  for (const segment of segments) {
+    if (segment === "..") {
+      throw new Error(`Path sanitization failed: traversal component in "${path}".`);
+    }
+  }
+
+  // Final check: after prefixing, the normalized path must stay under .contextforge/
+  const prefixed = `.contextforge/${path}`;
+  // Resolve . and redundant slashes without filesystem access
+  const normalized = prefixed.split("/").reduce<string[]>((acc, seg) => {
+    if (seg === "." || seg === "") return acc;
+    if (seg === "..") {
+      acc.pop();
+      return acc;
+    }
+    acc.push(seg);
+    return acc;
+  }, []).join("/");
+
+  if (!normalized.startsWith(".contextforge/")) {
+    throw new Error(`Path sanitization failed: "${path}" escapes .contextforge/ directory.`);
+  }
+}
 
 /**
  * POST /api/git/[provider]/push
@@ -17,9 +69,10 @@ import type { ProjectSpec } from "../../../../../types/projectspec";
  *   2. Decrypt stored token
  *   3. Re-fetch spec from context_packages by specId (never trust client files)
  *   4. assemblePackage(spec) server-side
- *   5. Prefix all paths with .contextforge/
+ *   5. Validate and prefix all paths with .contextforge/
  *   6. createBranch → commitFiles → createPullRequest
- *   7. Record in repository_pushes
+ *   7. On failure: best-effort branch cleanup
+ *   8. Record in repository_pushes
  */
 export async function POST(
   req: Request,
@@ -105,23 +158,29 @@ export async function POST(
   }
 
   const spec = pkg.spec as ProjectSpec;
-  const branchName = `contextforge/update-${Date.now()}`;
+
+  // Issue 2: collision-resistant branch name with crypto random suffix
+  const randomSuffix = crypto.randomBytes(4).toString("hex"); // 8 hex chars, URL-safe
+  const branchName = `contextforge/update-${Date.now()}-${randomSuffix}`;
 
   // ---- Assemble + push ----
+  let branchCreated = false;
+  const gitProvider = getGitProvider(provider);
+
   try {
     // Re-assemble the package server-side
     const { files } = await assemblePackage(spec);
 
-    // Prefix all paths with .contextforge/ — only writes into this directory
+    // Issue 3: validate all paths before prefixing
     const prefixedFiles: Record<string, string> = {};
     for (const [path, content] of Object.entries(files)) {
+      validatePath(path);
       prefixedFiles[`.contextforge/${path}`] = content;
     }
 
-    const gitProvider = getGitProvider(provider);
-
     // Create feature branch
     await gitProvider.createBranch(accessToken, repositoryName, branchName, defaultBranch);
+    branchCreated = true;
 
     // Commit all files in a single batch operation
     await gitProvider.commitFiles(
@@ -156,6 +215,17 @@ export async function POST(
     return Response.json({ prUrl });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Push failed.";
+
+    // Issue 4: best-effort branch cleanup if branch was created but
+    // commitFiles or createPullRequest failed
+    if (branchCreated) {
+      try {
+        await gitProvider.deleteBranch(accessToken, repositoryName, branchName);
+      } catch {
+        // Intentionally swallowed — cleanup is best-effort,
+        // must never hide the original error
+      }
+    }
 
     // Record failure — wrapped in try/catch so a DB error doesn't mask the original
     try {

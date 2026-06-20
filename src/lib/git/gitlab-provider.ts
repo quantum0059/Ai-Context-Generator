@@ -3,6 +3,10 @@ import type { AuthResult, GitProvider, Repository } from "./git-provider";
 
 const API = "https://gitlab.com/api/v4";
 
+/** HTTP status codes that indicate transient failures worth retrying. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_RETRIES = 3;
+
 /** Standard headers for GitLab REST API v4. */
 function headers(token: string) {
   return {
@@ -17,6 +21,38 @@ async function assertOk(res: Response, context: string): Promise<void> {
     const body = await res.text().catch(() => "");
     throw new Error(`GitLab ${context} failed (${res.status}): ${body}`);
   }
+}
+
+/**
+ * Fetch wrapper with exponential-backoff retry for transient failures.
+ * Only retries 429/500/502/503/504. Never retries 401/403/404/422.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  context: string,
+): Promise<Response> {
+  let lastRes: Response | undefined;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const res = await fetch(url, init);
+
+    if (res.ok || !RETRYABLE_STATUSES.has(res.status)) {
+      return res;
+    }
+
+    lastRes = res;
+
+    // Exponential backoff: 1s, 2s, 4s
+    if (attempt < MAX_RETRIES - 1) {
+      const delayMs = Math.pow(2, attempt) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // All retries exhausted — throw with the last response
+  const body = await lastRes!.text().catch(() => "");
+  throw new Error(`GitLab ${context} failed after ${MAX_RETRIES} attempts (${lastRes!.status}): ${body}`);
 }
 
 /** Normalizes GitLab visibility strings to the union type. */
@@ -115,9 +151,11 @@ export class GitLabProvider implements GitProvider {
       qs.set("search", params.search);
     }
 
-    const res = await fetch(`${API}/projects?${qs}`, {
-      headers: headers(accessToken),
-    });
+    const res = await fetchWithRetry(
+      `${API}/projects?${qs}`,
+      { headers: headers(accessToken) },
+      "list projects",
+    );
     await assertOk(res, "list projects");
 
     type GLProject = {
@@ -153,16 +191,20 @@ export class GitLabProvider implements GitProvider {
       initializeReadme: boolean;
     },
   ): Promise<Repository> {
-    const res = await fetch(`${API}/projects`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        name: opts.name,
-        description: opts.description ?? "",
-        visibility: opts.visibility,
-        initialize_with_readme: opts.initializeReadme,
-      }),
-    });
+    const res = await fetchWithRetry(
+      `${API}/projects`,
+      {
+        method: "POST",
+        headers: headers(accessToken),
+        body: JSON.stringify({
+          name: opts.name,
+          description: opts.description ?? "",
+          visibility: opts.visibility,
+          initialize_with_readme: opts.initializeReadme,
+        }),
+      },
+      "create project",
+    );
     await assertOk(res, "create project");
 
     const p = (await res.json()) as {
@@ -195,19 +237,46 @@ export class GitLabProvider implements GitProvider {
     fromBranch: string,
   ): Promise<void> {
     const encodedRepo = encodeURIComponent(repo);
-    const res = await fetch(`${API}/projects/${encodedRepo}/repository/branches`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        branch: branchName,
-        ref: fromBranch,
-      }),
-    });
+    const res = await fetchWithRetry(
+      `${API}/projects/${encodedRepo}/repository/branches`,
+      {
+        method: "POST",
+        headers: headers(accessToken),
+        body: JSON.stringify({
+          branch: branchName,
+          ref: fromBranch,
+        }),
+      },
+      `create branch ${branchName}`,
+    );
     await assertOk(res, `create branch ${branchName}`);
   }
 
   // ---------------------------------------------------------------------------
-  // Commit files (Commits API — single request with actions array)
+  // Delete branch (best-effort cleanup)
+  // ---------------------------------------------------------------------------
+
+  async deleteBranch(
+    accessToken: string,
+    repo: string,
+    branchName: string,
+  ): Promise<void> {
+    const encodedRepo = encodeURIComponent(repo);
+    const res = await fetch(
+      `${API}/projects/${encodedRepo}/repository/branches/${encodeURIComponent(branchName)}`,
+      {
+        method: "DELETE",
+        headers: headers(accessToken),
+      },
+    );
+    // Best-effort — don't throw on failure
+    if (!res.ok) {
+      console.error(`GitLab delete branch ${branchName} failed (${res.status})`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Commit files (Commits API — single request with correct create/update actions)
   // ---------------------------------------------------------------------------
 
   async commitFiles(
@@ -218,50 +287,57 @@ export class GitLabProvider implements GitProvider {
     message: string,
   ): Promise<{ commitSha: string }> {
     const encodedRepo = encodeURIComponent(repo);
+    const hdrs = headers(accessToken);
 
-    // Build actions array — one entry per file
-    // We use "create" action with force: true which will create or overwrite
-    const actions = Object.entries(files).map(([path, content]) => ({
-      action: "create" as const,
+    // Query the repository tree to determine which files already exist.
+    // This is necessary to build a single actions[] array with correct
+    // "create" vs "update" actions — avoids the mixed-file bug where
+    // using all-create or all-update fails when both new and existing
+    // files are present in the same commit.
+    const existingPaths = new Set<string>();
+    const filePaths = Object.keys(files);
+
+    // Fetch tree entries recursively for the branch
+    const treeRes = await fetchWithRetry(
+      `${API}/projects/${encodedRepo}/repository/tree?ref=${encodeURIComponent(branch)}&recursive=true&per_page=100`,
+      { headers: hdrs },
+      "get repository tree",
+    );
+
+    if (treeRes.ok) {
+      type TreeEntry = { path: string; type: string };
+      const treeEntries = (await treeRes.json()) as TreeEntry[];
+      for (const entry of treeEntries) {
+        if (entry.type === "blob") {
+          existingPaths.add(entry.path);
+        }
+      }
+    }
+    // If tree fetch fails (e.g. empty repo), treat all files as new
+
+    // Build a single actions array with the correct action per file
+    const actions = filePaths.map((path) => ({
+      action: existingPaths.has(path) ? ("update" as const) : ("create" as const),
       file_path: path,
-      content: Buffer.from(content, "utf8").toString("base64"),
+      content: Buffer.from(files[path], "utf8").toString("base64"),
       encoding: "base64" as const,
     }));
 
-    const res = await fetch(`${API}/projects/${encodedRepo}/repository/commits`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        branch,
-        commit_message: message,
-        actions,
-      }),
-    });
-
-    // If any file already exists, GitLab returns 400. Retry with "update" action.
-    if (res.status === 400) {
-      const updateActions = Object.entries(files).map(([path, content]) => ({
-        action: "update" as const,
-        file_path: path,
-        content: Buffer.from(content, "utf8").toString("base64"),
-        encoding: "base64" as const,
-      }));
-
-      const retryRes = await fetch(`${API}/projects/${encodedRepo}/repository/commits`, {
+    const res = await fetchWithRetry(
+      `${API}/projects/${encodedRepo}/repository/commits`,
+      {
         method: "POST",
-        headers: headers(accessToken),
+        headers: hdrs,
         body: JSON.stringify({
           branch,
           commit_message: message,
-          actions: updateActions,
+          actions,
         }),
-      });
-      await assertOk(retryRes, "commit files (update)");
-      const data = (await retryRes.json()) as { id: string };
-      return { commitSha: data.id };
-    }
-
+      },
+      "commit files",
+    );
     await assertOk(res, "commit files");
+
     const data = (await res.json()) as { id: string };
     return { commitSha: data.id };
   }
@@ -278,15 +354,19 @@ export class GitLabProvider implements GitProvider {
     title: string,
   ): Promise<{ url: string }> {
     const encodedRepo = encodeURIComponent(repo);
-    const res = await fetch(`${API}/projects/${encodedRepo}/merge_requests`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        source_branch: fromBranch,
-        target_branch: toBranch,
-        title,
-      }),
-    });
+    const res = await fetchWithRetry(
+      `${API}/projects/${encodedRepo}/merge_requests`,
+      {
+        method: "POST",
+        headers: headers(accessToken),
+        body: JSON.stringify({
+          source_branch: fromBranch,
+          target_branch: toBranch,
+          title,
+        }),
+      },
+      "create merge request",
+    );
     await assertOk(res, "create merge request");
 
     const mr = (await res.json()) as { web_url: string };

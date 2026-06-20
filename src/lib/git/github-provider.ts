@@ -3,6 +3,10 @@ import type { AuthResult, GitProvider, Repository } from "./git-provider";
 
 const API = "https://api.github.com";
 
+/** HTTP status codes that indicate transient failures worth retrying. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_RETRIES = 3;
+
 /** Standard headers for GitHub REST API v3. */
 function headers(token: string) {
   return {
@@ -18,6 +22,38 @@ async function assertOk(res: Response, context: string): Promise<void> {
     const body = await res.text().catch(() => "");
     throw new Error(`GitHub ${context} failed (${res.status}): ${body}`);
   }
+}
+
+/**
+ * Fetch wrapper with exponential-backoff retry for transient failures.
+ * Only retries 429/500/502/503/504. Never retries 401/403/404/422.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  context: string,
+): Promise<Response> {
+  let lastRes: Response | undefined;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const res = await fetch(url, init);
+
+    if (res.ok || !RETRYABLE_STATUSES.has(res.status)) {
+      return res;
+    }
+
+    lastRes = res;
+
+    // Exponential backoff: 1s, 2s, 4s
+    if (attempt < MAX_RETRIES - 1) {
+      const delayMs = Math.pow(2, attempt) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // All retries exhausted — throw with the last response
+  const body = await lastRes!.text().catch(() => "");
+  throw new Error(`GitHub ${context} failed after ${MAX_RETRIES} attempts (${lastRes!.status}): ${body}`);
 }
 
 /**
@@ -105,9 +141,11 @@ export class GitHubProvider implements GitProvider {
       affiliation: "owner,collaborator,organization_member",
     });
 
-    const res = await fetch(`${API}/user/repos?${qs}`, {
-      headers: headers(accessToken),
-    });
+    const res = await fetchWithRetry(
+      `${API}/user/repos?${qs}`,
+      { headers: headers(accessToken) },
+      "list repos",
+    );
     await assertOk(res, "list repos");
 
     type GHRepo = {
@@ -153,16 +191,20 @@ export class GitHubProvider implements GitProvider {
       initializeReadme: boolean;
     },
   ): Promise<Repository> {
-    const res = await fetch(`${API}/user/repos`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        name: opts.name,
-        description: opts.description ?? "",
-        private: opts.visibility === "private",
-        auto_init: opts.initializeReadme,
-      }),
-    });
+    const res = await fetchWithRetry(
+      `${API}/user/repos`,
+      {
+        method: "POST",
+        headers: headers(accessToken),
+        body: JSON.stringify({
+          name: opts.name,
+          description: opts.description ?? "",
+          private: opts.visibility === "private",
+          auto_init: opts.initializeReadme,
+        }),
+      },
+      "create repo",
+    );
     await assertOk(res, "create repo");
 
     const r = (await res.json()) as {
@@ -195,23 +237,50 @@ export class GitHubProvider implements GitProvider {
     fromBranch: string,
   ): Promise<void> {
     // 1. Get the SHA of the source branch
-    const refRes = await fetch(
+    const refRes = await fetchWithRetry(
       `${API}/repos/${repo}/git/ref/heads/${encodeURIComponent(fromBranch)}`,
       { headers: headers(accessToken) },
+      `get ref heads/${fromBranch}`,
     );
     await assertOk(refRes, `get ref heads/${fromBranch}`);
     const refData = (await refRes.json()) as { object: { sha: string } };
 
     // 2. Create new branch ref
-    const createRes = await fetch(`${API}/repos/${repo}/git/refs`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        ref: `refs/heads/${branchName}`,
-        sha: refData.object.sha,
-      }),
-    });
+    const createRes = await fetchWithRetry(
+      `${API}/repos/${repo}/git/refs`,
+      {
+        method: "POST",
+        headers: headers(accessToken),
+        body: JSON.stringify({
+          ref: `refs/heads/${branchName}`,
+          sha: refData.object.sha,
+        }),
+      },
+      `create branch ${branchName}`,
+    );
     await assertOk(createRes, `create branch ${branchName}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delete branch (best-effort cleanup)
+  // ---------------------------------------------------------------------------
+
+  async deleteBranch(
+    accessToken: string,
+    repo: string,
+    branchName: string,
+  ): Promise<void> {
+    const res = await fetch(
+      `${API}/repos/${repo}/git/refs/heads/${encodeURIComponent(branchName)}`,
+      {
+        method: "DELETE",
+        headers: headers(accessToken),
+      },
+    );
+    // Best-effort — don't throw on failure
+    if (!res.ok) {
+      console.error(`GitHub delete branch ${branchName} failed (${res.status})`);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -228,18 +297,21 @@ export class GitHubProvider implements GitProvider {
     const hdrs = headers(accessToken);
 
     // 1. Get current commit SHA for the branch
-    const refRes = await fetch(
+    const refRes = await fetchWithRetry(
       `${API}/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`,
       { headers: hdrs },
+      `get ref heads/${branch}`,
     );
     await assertOk(refRes, `get ref heads/${branch}`);
     const refData = (await refRes.json()) as { object: { sha: string } };
     const parentSha = refData.object.sha;
 
     // 2. Get the base tree SHA
-    const commitRes = await fetch(`${API}/repos/${repo}/git/commits/${parentSha}`, {
-      headers: hdrs,
-    });
+    const commitRes = await fetchWithRetry(
+      `${API}/repos/${repo}/git/commits/${parentSha}`,
+      { headers: hdrs },
+      "get parent commit",
+    );
     await assertOk(commitRes, "get parent commit");
     const commitData = (await commitRes.json()) as { tree: { sha: string } };
     const baseTreeSha = commitData.tree.sha;
@@ -247,14 +319,18 @@ export class GitHubProvider implements GitProvider {
     // 3. Create blobs for each file
     const treeEntries: { path: string; mode: string; type: string; sha: string }[] = [];
     for (const [path, content] of Object.entries(files)) {
-      const blobRes = await fetch(`${API}/repos/${repo}/git/blobs`, {
-        method: "POST",
-        headers: hdrs,
-        body: JSON.stringify({
-          content: Buffer.from(content, "utf8").toString("base64"),
-          encoding: "base64",
-        }),
-      });
+      const blobRes = await fetchWithRetry(
+        `${API}/repos/${repo}/git/blobs`,
+        {
+          method: "POST",
+          headers: hdrs,
+          body: JSON.stringify({
+            content: Buffer.from(content, "utf8").toString("base64"),
+            encoding: "base64",
+          }),
+        },
+        `create blob ${path}`,
+      );
       await assertOk(blobRes, `create blob ${path}`);
       const blobData = (await blobRes.json()) as { sha: string };
       treeEntries.push({
@@ -266,38 +342,47 @@ export class GitHubProvider implements GitProvider {
     }
 
     // 4. Create tree (batch — single API call for the tree)
-    const treeRes = await fetch(`${API}/repos/${repo}/git/trees`, {
-      method: "POST",
-      headers: hdrs,
-      body: JSON.stringify({
-        base_tree: baseTreeSha,
-        tree: treeEntries,
-      }),
-    });
+    const treeRes = await fetchWithRetry(
+      `${API}/repos/${repo}/git/trees`,
+      {
+        method: "POST",
+        headers: hdrs,
+        body: JSON.stringify({
+          base_tree: baseTreeSha,
+          tree: treeEntries,
+        }),
+      },
+      "create tree",
+    );
     await assertOk(treeRes, "create tree");
     const treeData = (await treeRes.json()) as { sha: string };
 
     // 5. Create commit
-    const newCommitRes = await fetch(`${API}/repos/${repo}/git/commits`, {
-      method: "POST",
-      headers: hdrs,
-      body: JSON.stringify({
-        message,
-        tree: treeData.sha,
-        parents: [parentSha],
-      }),
-    });
+    const newCommitRes = await fetchWithRetry(
+      `${API}/repos/${repo}/git/commits`,
+      {
+        method: "POST",
+        headers: hdrs,
+        body: JSON.stringify({
+          message,
+          tree: treeData.sha,
+          parents: [parentSha],
+        }),
+      },
+      "create commit",
+    );
     await assertOk(newCommitRes, "create commit");
     const newCommitData = (await newCommitRes.json()) as { sha: string };
 
     // 6. Update branch ref to point at new commit
-    const updateRefRes = await fetch(
+    const updateRefRes = await fetchWithRetry(
       `${API}/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`,
       {
         method: "PATCH",
         headers: hdrs,
         body: JSON.stringify({ sha: newCommitData.sha }),
       },
+      "update branch ref",
     );
     await assertOk(updateRefRes, "update branch ref");
 
@@ -315,15 +400,19 @@ export class GitHubProvider implements GitProvider {
     toBranch: string,
     title: string,
   ): Promise<{ url: string }> {
-    const res = await fetch(`${API}/repos/${repo}/pulls`, {
-      method: "POST",
-      headers: headers(accessToken),
-      body: JSON.stringify({
-        title,
-        head: fromBranch,
-        base: toBranch,
-      }),
-    });
+    const res = await fetchWithRetry(
+      `${API}/repos/${repo}/pulls`,
+      {
+        method: "POST",
+        headers: headers(accessToken),
+        body: JSON.stringify({
+          title,
+          head: fromBranch,
+          base: toBranch,
+        }),
+      },
+      "create pull request",
+    );
     await assertOk(res, "create pull request");
 
     const pr = (await res.json()) as { html_url: string };
