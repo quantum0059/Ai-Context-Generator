@@ -1,13 +1,22 @@
 import { z } from "zod";
+import { grokJson, isGrokConfigured } from "./grok";
 
 /**
- * ContextForge AI engine: Anthropic Claude API.
- * All calls return schema-validated JSON with retries. Callers must provide
- * a deterministic fallback so the app degrades gracefully without a key.
+ * ContextForge AI engine: unified provider gateway.
+ *
+ * Priority order:
+ *   1. Anthropic Claude (ANTHROPIC_API_KEY)
+ *   2. xAI Grok        (XAI_API_KEY)
+ *   3. No AI — callers fall back to deterministic heuristics
+ *
+ * All callers import `isClaudeConfigured` and `claudeJson` from this file.
+ * The function names are kept for backward compatibility — they dispatch to
+ * whichever provider is configured.
  */
 
+/** Returns true if ANY AI backend (Claude or Grok) is configured. */
 export function isClaudeConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY) || isGrokConfigured();
 }
 
 function extractJson(text: string): string {
@@ -20,7 +29,7 @@ function extractJson(text: string): string {
   return text.slice(start, end + 1);
 }
 
-export async function claudeJson<T>(
+async function callClaude<T>(
   prompt: string,
   schema: z.ZodType<T>,
   retries = 2,
@@ -61,4 +70,26 @@ export async function claudeJson<T>(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Claude call failed");
+}
+
+/**
+ * Sends a prompt to the configured AI provider and validates the response
+ * against the given Zod schema. Tries Claude first, then Grok.
+ *
+ * All callers import this as `claudeJson` for backward compatibility.
+ */
+export async function claudeJson<T>(
+  prompt: string,
+  schema: z.ZodType<T>,
+  retries = 2,
+): Promise<T> {
+  // Prefer Claude when available
+  if (process.env.ANTHROPIC_API_KEY) {
+    return callClaude(prompt, schema, retries);
+  }
+  // Fallback to Grok
+  if (isGrokConfigured()) {
+    return grokJson(prompt, schema, retries);
+  }
+  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or XAI_API_KEY.");
 }
