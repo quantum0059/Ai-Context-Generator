@@ -41,7 +41,6 @@ const WizardContext = createContext<WizardContextProps | undefined>(undefined);
 
 export function WizardProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<WizardState>(DEFAULT_STATE);
-  const [loaded, setLoaded] = useState(false);
 
   // Load from sessionStorage on mount
   useEffect(() => {
@@ -71,30 +70,12 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
           designReferences: (spec.designReferences || []).join(", "),
         };
         setState(templateState);
-        sessionStorage.setItem("cf-wizard-state", JSON.stringify(templateState));
         sessionStorage.removeItem("contextforge_template_spec");
       } catch (e) {
         console.error("Failed to parse template spec", e);
       }
-    } else {
-      const saved = sessionStorage.getItem("cf-wizard-state");
-      if (saved) {
-        try {
-          setState(JSON.parse(saved));
-        } catch (e) {
-          console.error("Failed to parse saved wizard state", e);
-        }
-      }
     }
-    setLoaded(true);
   }, []);
-
-  // Save to sessionStorage when state changes
-  useEffect(() => {
-    if (loaded) {
-      sessionStorage.setItem("cf-wizard-state", JSON.stringify(state));
-    }
-  }, [state, loaded]);
 
   const updateState = (patch: Partial<WizardState>) => {
     setState((prev) => ({ ...prev, ...patch }));
@@ -122,7 +103,6 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
 
   const resetWizard = () => {
     setState(DEFAULT_STATE);
-    sessionStorage.removeItem("cf-wizard-state");
   };
 
   return (

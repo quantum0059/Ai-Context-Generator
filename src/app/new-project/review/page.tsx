@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { downloadZip } from "@/lib/download";
+import JSZip from "jszip";
 
 import { useWizard } from "../wizard-context";
 import { useRouter } from "next/navigation";
@@ -84,7 +84,17 @@ export default function ReviewPage() {
       });
       if (!res.ok) throw new Error("Package generation failed.");
       const data = (await res.json()) as { files: Record<string, string>; meta: PackageMeta };
-      await downloadZip(data.files, state.projectName);
+      const zip = new JSZip();
+      for (const [path, content] of Object.entries(data.files)) {
+        zip.file(`project-package/${path}`, content);
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${state.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-context-package.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
       setGenerated({ count: Object.keys(data.files).length, meta: data.meta });
       setLastSpec(spec);
       setLastFiles(data.files);
@@ -234,12 +244,6 @@ export default function ReviewPage() {
                   className="h-8 rounded bg-emerald-600 px-4 text-xs font-semibold text-white hover:bg-emerald-700"
                 >
                   Save to Account
-                </Button>
-                <Button
-                  onClick={() => router.push("/dashboard/package-preview")}
-                  className="h-8 rounded bg-white/10 px-4 text-xs font-semibold text-white hover:bg-white/20 border-0"
-                >
-                  View Package Preview
                 </Button>
                 {saveMessage && (
                   <span className="text-emerald-500 text-xs font-medium">
