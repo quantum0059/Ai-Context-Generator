@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import JSZip from "jszip";
 
@@ -30,6 +30,23 @@ export default function ReviewPage() {
   const [lastSpec, setLastSpec] = useState<ProjectSpec | null>(null);
   const [lastFiles, setLastFiles] = useState<Record<string, string> | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    const savedFilesStr = sessionStorage.getItem("contextforge_generated_files");
+    const savedSpecId = sessionStorage.getItem("contextforge_generated_spec_id");
+    if (savedFilesStr) {
+      try {
+        const files = JSON.parse(savedFilesStr);
+        setGenerated({ count: Object.keys(files).length, meta: { packageVersion: "1.0.0" } as PackageMeta });
+        setLastFiles(files);
+        if (savedSpecId) {
+          setLastSpec({ id: savedSpecId } as ProjectSpec);
+        }
+      } catch (e) {
+        console.error("Failed to restore generated files from session", e);
+      }
+    }
+  }, []);
 
   const categories = Object.keys(state.stack);
 

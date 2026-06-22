@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   RepositoryPicker,
   type PickedRepository,
@@ -64,6 +65,8 @@ export function GitExportSection({ specId }: GitExportSectionProps) {
     reason?: string;
   } | null>(null);
 
+  const router = useRouter();
+
   // --- Check connection status on mount ---
   const checkStatus = useCallback(async (p: Provider) => {
     try {
@@ -89,8 +92,7 @@ export function GitExportSection({ specId }: GitExportSectionProps) {
   }, []);
 
   useEffect(() => {
-    void checkStatus("github");
-    void checkStatus("gitlab");
+    Promise.all([checkStatus("github"), checkStatus("gitlab")]).catch(console.error);
 
     // Read OAuth redirect query params (git_connect=success|error&provider=github|gitlab&reason=...)
     if (typeof window === "undefined") return;
@@ -103,19 +105,19 @@ export function GitExportSection({ specId }: GitExportSectionProps) {
         status: gitConnect as "success" | "error",
         reason: params.get("reason") ?? undefined,
       });
-      // Clear the query params from the URL without reload
+      // Clear the query params from the URL without reload using router.replace
       const url = new URL(window.location.href);
       url.searchParams.delete("git_connect");
       url.searchParams.delete("provider");
       url.searchParams.delete("reason");
-      window.history.replaceState({}, "", url.pathname + url.search);
+      router.replace(url.pathname + url.search);
 
       // Re-check the provider status since we just got back from OAuth
       if (provider === "github" || provider === "gitlab") {
         void checkStatus(provider);
       }
     }
-  }, [checkStatus]);
+  }, [checkStatus, router]);
 
   function updateProvider(p: Provider, patch: Partial<ProviderState>) {
     setProviders((prev) => ({

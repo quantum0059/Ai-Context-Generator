@@ -85,7 +85,7 @@ export default function LandingPage() {
     if (typeof window !== "undefined") {
       const template = sessionStorage.getItem("contextforge_template_spec");
       if (template) {
-        router.push("/new-project/review");
+        router.push("/new-project/review" + window.location.search);
       }
     }
   }, [router]);
