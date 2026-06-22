@@ -12,7 +12,7 @@ describe("package output review", () => {
       constraints: { budget: "free tiers only", avoid: ["Firebase"] },
     };
 
-    const stack = {
+    const stack: Record<string, import("../src/types/projectspec").StackEntry> = {
       frontendFramework: { value: "Next.js", source: "suggested", confidence: "high" as const },
       authentication: { value: "Clerk", source: "suggested", confidence: "high" as const },
       database: { value: "Supabase", source: "suggested", confidence: "high" as const },

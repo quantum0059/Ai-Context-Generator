@@ -49,6 +49,11 @@ export async function POST(req: Request) {
     generated_at: meta.generatedAt,
   });
   if (error) {
+    if (error.message.includes("schema cache") || error.message.includes("does not exist")) {
+      return Response.json({ 
+        error: "Database table 'context_packages' is missing or not cached. Please run database/schema.sql in your Supabase SQL editor and reload the schema cache." 
+      }, { status: 500 });
+    }
     return Response.json({ error: error.message }, { status: 500 });
   }
   return Response.json({ saved: true });

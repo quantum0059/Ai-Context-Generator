@@ -2,7 +2,7 @@ import type { PackageFiles, PackageMeta, ProjectSpec } from "../types/projectspe
 import { projectSpecSchema } from "./spec";
 import { generateAgents } from "./generators/agents";
 import { generateDecisions } from "./generators/decisions";
-import { generateDependencyGraph, orderFeatures } from "./generators/dependencyGraph";
+import { generateDependencyGraph, generateDependencyGraphJson, orderFeatures } from "./generators/dependencyGraph";
 import {
   generateAiContext,
   generatePackageMeta,
@@ -16,6 +16,7 @@ import { generateManifests } from "./generators/manifests";
 import { generatePromptMaterial } from "./generators/promptMaterial";
 import { generatePrompts } from "./generators/prompts";
 import { generateSkills } from "./generators/skills";
+import { generateMcpToolDefinition } from "./generators/mcp-tool";
 
 /** No Generic Content rule (Section 14). */
 function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
@@ -45,21 +46,22 @@ export async function assemblePackage(
       generatePrompts(validated),
       generatePromptMaterial(validated),
       Promise.resolve(generateSkills(validated)),
-      Promise.resolve(generateDecisions(validated)),
+      generateDecisions(validated),
       Promise.resolve(generateTemplates(validated)),
-      Promise.resolve(generateSetup(validated)),
+      generateSetup(validated),
     ]);
-  const manifestFiles = generateManifests(validated, promptFiles, materialFiles);
+  const manifestFiles = await generateManifests(validated, promptFiles, materialFiles);
   const { json: metaJson, meta } = generatePackageMeta(validated);
 
   const files: PackageFiles = {
     "README.md": generatePackageReadme(validated),
-    "agents.md": generateAgents(validated),
+    "agents.md": await generateAgents(validated),
     "ai-context.json": generateAiContext(validated),
     "package-meta.json": metaJson,
     "roadmap.md": generateRoadmap(validated, ordered),
     "resources.md": generateResources(validated),
     "dependency-graph.md": generateDependencyGraph(validated, ordered),
+    "dependency-graph.json": await generateDependencyGraphJson(validated),
     ...promptFiles,
     ...materialFiles,
     ...skillFiles,
@@ -68,6 +70,9 @@ export async function assemblePackage(
     ...manifestFiles,
     ...setupFiles,
   };
+
+  const mcpToolDefinition = generateMcpToolDefinition(validated, files);
+  files["mcp-server.json"] = mcpToolDefinition;
 
   assertNoGenericContent(validated, files);
   return { files, meta };

@@ -103,13 +103,13 @@ export async function regeneratePackage(
     for (const path of Object.keys(files)) {
       if (path.startsWith("decisions/")) delete files[path];
     }
-    for (const [path, content] of Object.entries(generateDecisions(newSpec))) {
+    for (const [path, content] of Object.entries(await generateDecisions(newSpec))) {
       files[path] = content;
       changed.add(path);
     }
     files["resources.md"] = generateResources(newSpec);
     changed.add("resources.md");
-    for (const [path, content] of Object.entries(generateSetup(newSpec))) {
+    for (const [path, content] of Object.entries(await generateSetup(newSpec))) {
       files[path] = content;
       changed.add(path);
     }
@@ -153,7 +153,7 @@ export async function regeneratePackage(
     const promptFiles = pick(files, (p) => p.startsWith("prompts/"));
     const materialFiles = pick(files, (p) => p.startsWith("prompt_material/"));
     for (const [path, content] of Object.entries(
-      generateManifests(newSpec, promptFiles, materialFiles),
+      await generateManifests(newSpec, promptFiles, materialFiles),
     )) {
       files[path] = content;
       changed.add(path);
@@ -161,7 +161,7 @@ export async function regeneratePackage(
   }
 
   // --- Always regenerated from the new spec ---
-  files["agents.md"] = generateAgents(newSpec);
+  files["agents.md"] = await generateAgents(newSpec);
   files["ai-context.json"] = generateAiContext(newSpec);
   files["README.md"] = generatePackageReadme(newSpec);
   changed.add("agents.md");

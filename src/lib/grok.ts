@@ -63,3 +63,45 @@ export async function grokJson<T>(
   }
   throw lastError instanceof Error ? lastError : new Error("Grok call failed");
 }
+
+export async function grokText(
+  prompt: string,
+  retries = 2,
+): Promise<string> {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) throw new Error("XAI_API_KEY is not configured");
+  const model = process.env.XAI_MODEL ?? "grok-3-mini-fast";
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          temperature: 0,
+        }),
+      });
+      if (!res.ok) throw new Error(`Grok API error: ${res.status}`);
+      const data = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const text = data.choices?.[0]?.message?.content ?? "";
+      return text;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Grok text call failed");
+}
+

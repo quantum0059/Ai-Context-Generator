@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { grokJson, isGrokConfigured } from "./grok";
+import { grokJson, grokText, isGrokConfigured } from "./grok";
 
 /**
  * ContextForge AI engine: unified provider gateway.
@@ -72,6 +72,47 @@ async function callClaude<T>(
   throw lastError instanceof Error ? lastError : new Error("Claude call failed");
 }
 
+async function callClaudeText(
+  prompt: string,
+  retries = 2,
+): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
+  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error(`Claude API error: ${res.status}`);
+      const data = (await res.json()) as { content?: Array<{ text?: string }> };
+      const text = data.content?.[0]?.text ?? "";
+      return text;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Claude text call failed");
+}
+
+
 /**
  * Sends a prompt to the configured AI provider and validates the response
  * against the given Zod schema. Tries Claude first, then Grok.
@@ -93,3 +134,22 @@ export async function claudeJson<T>(
   }
   throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or XAI_API_KEY.");
 }
+
+/**
+ * Sends a prompt to the configured AI provider and returns the raw text response.
+ */
+export async function claudeText(
+  prompt: string,
+  retries = 2,
+): Promise<string> {
+  // Prefer Claude when available
+  if (process.env.ANTHROPIC_API_KEY) {
+    return callClaudeText(prompt, retries);
+  }
+  // Fallback to Grok
+  if (isGrokConfigured()) {
+    return grokText(prompt, retries);
+  }
+  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or XAI_API_KEY.");
+}
+

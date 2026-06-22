@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { claudeJson, isClaudeConfigured } from "../../lib/claude";
+import { claudeJson, claudeText, isClaudeConfigured } from "../../lib/claude";
 import type { ProjectSpec } from "../../types/projectspec";
 
 const orderSchema = z.object({
@@ -74,4 +74,81 @@ ${chain}
 ## Ordering rationale
 ${detail || "_No features were specified in the ProjectSpec._"}
 `;
+}
+
+export async function generateDependencyGraphJson(
+  spec: ProjectSpec,
+): Promise<string> {
+  const systemPrompt =
+    "You are a technical project manager determining the optimal build order for a software project. Return valid JSON only, no markdown, no code fences.";
+
+  const userPrompt = `Determine the build order and dependencies for:
+
+Project: ${spec.projectName}
+Features: ${spec.features.join(", ")}
+Stack: ${JSON.stringify(spec.stack)}
+Platform: ${spec.platform}
+
+Return this exact JSON structure:
+{
+  "buildOrder": [
+    {
+      "phase": 1,
+      "name": "(phase name like 'Foundation')",
+      "features": ["(array of feature names)"],
+      "reason": "(one sentence why these go first)",
+      "canParallelize": "(boolean — can features in this phase be built simultaneously)"
+    }
+  ],
+  "featureDependencies": {
+    "(featureName)": ["(array of feature names that must be complete before this one can start)"]
+  },
+  "criticalPath": ["(array of feature names in order that represents the longest dependency chain — this is the minimum sequential build path)"],
+  "parallelizableGroups": [
+    ["(arrays of feature names that can be built simultaneously after their dependencies are met)"]
+  ],
+  "foundationRequirements": {
+    "mustBuildFirst": ["(array of features or infrastructure items needed before ANY feature work — typically: database schema, auth, environment setup)"],
+    "reason": "(one sentence)"
+  }
+}
+
+Rules for determining order:
+- Authentication must come before any feature that has user-owned data
+- Database schema must come before any feature that reads or writes data
+- Payment integration depends on auth and user profiles
+- AI features depend on auth and any data storage they use
+- Apply these rules to ${spec.features.join(", ")} specifically`;
+
+  const fallback = {
+    buildOrder: [],
+    featureDependencies: {},
+    criticalPath: [],
+    parallelizableGroups: [],
+    foundationRequirements: {
+      mustBuildFirst: [],
+      reason: "No features specified or generation failed",
+    },
+  };
+
+  if (isClaudeConfigured() && spec.features.length > 0) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await claudeText(systemPrompt + "\n\n" + userPrompt);
+        // Attempt to clean markdown JSON formatting if present
+        const cleaned = response
+          .replace(/^```json\s*/m, "")
+          .replace(/^```\s*$/m, "")
+          .trim();
+        const parsed = JSON.parse(cleaned);
+        return JSON.stringify(parsed, null, 2) + "\n";
+      } catch (e) {
+        if (attempt === 1) {
+          // Fall through to fallback after one retry
+        }
+      }
+    }
+  }
+
+  return JSON.stringify(fallback, null, 2) + "\n";
 }

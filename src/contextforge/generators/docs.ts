@@ -1,6 +1,7 @@
 import { registryByName } from "../registry";
 import type { PackageFiles, PackageMeta, ProjectSpec } from "../../types/projectspec";
 import { lockedEntries, slugify } from "./shared";
+import { claudeText, isClaudeConfigured } from "../../lib/claude";
 
 export function generatePackageMeta(spec: ProjectSpec): { json: string; meta: PackageMeta } {
   const meta: PackageMeta = {
@@ -653,7 +654,102 @@ describe("createTodo", () => {
   };
 }
 
-export function generateSetup(spec: ProjectSpec): PackageFiles {
+export async function generateSetup(spec: ProjectSpec): Promise<PackageFiles> {
+  const systemPrompt = `You are a senior DevOps engineer generating project bootstrapping files. Every file must work correctly when executed against this exact stack — no placeholders, no 'TODO: replace this', no generic commands that might not apply.`;
+
+  const userPrompt = `Generate complete setup files for:
+
+Project: ${spec.projectName}
+Platform: ${spec.platform}
+Stack: ${JSON.stringify(spec.stack)}
+Features: ${spec.features.join(', ')}
+
+Generate ALL of the following:
+
+---
+FILE: setup/install.sh
+---
+A bash script that:
+1. Checks prerequisites (Node version, required CLIs) and exits with a helpful message if any are missing
+2. Runs npm install (or the correct package manager for this stack)
+3. Copies .env.example to .env.local if .env.local does not already exist
+4. Runs any required setup commands for each service in the stack (e.g. 'npx prisma migrate dev' for Prisma, 'supabase db push' for Supabase, etc.)
+5. Prints a 'Setup complete' message with the exact command to start the dev server
+
+---
+FILE: setup/install.ps1
+---
+PowerShell equivalent of install.sh, same steps, correct PowerShell syntax.
+
+---
+FILE: setup/.env.example
+---
+Every environment variable this project requires, with:
+- The exact variable name
+- A comment explaining what it is and where to get it
+- A realistic non-secret example value
+- Variables grouped by service (Clerk, Supabase, Stripe, etc.)
+
+Only include variables for services actually in ${JSON.stringify(spec.stack)}. Do not include variables for services not in the stack.
+
+---
+FILE: setup/env-validation.ts
+---
+A TypeScript module using Zod that:
+- Validates all required environment variables on startup
+- Throws a clear error naming the missing variable and linking to where to get it if any are missing
+- Exports the validated env object for use throughout the project
+
+Example structure:
+import { z } from 'zod'
+
+const envSchema = z.object({
+  // (one entry per required env var, with z.string() and a descriptive error message)
+})
+
+export const env = envSchema.parse(process.env)
+
+---
+FILE: setup/health-check.ts
+---
+A TypeScript script that:
+- Attempts to connect to each external service in the stack (database, auth provider, payment provider, etc.)
+- Prints a green checkmark or red X for each service
+- Exits with code 1 if any service is unreachable
+
+---
+FILE: setup/setup-guide.md
+---
+A human-readable guide:
+1. Prerequisites (exact versions required)
+2. Getting API keys (one section per service with exact steps and links to the correct dashboard page)
+3. Running the install script
+4. Verifying setup with the health check
+5. Starting the development server
+6. Common setup problems and solutions (3-5 real ones for this specific stack)`;
+
+  if (isClaudeConfigured()) {
+    try {
+      const response = await claudeText(systemPrompt + "\n\n" + userPrompt);
+      const files: PackageFiles = {};
+      const parts = response.split(/---\nFILE:\s*(.+?)\n---/g);
+      for (let i = 1; i < parts.length; i += 2) {
+        const path = parts[i].trim();
+        const content = parts[i + 1].trim();
+        if (path) files[path] = content + "\n";
+      }
+      if (Object.keys(files).length > 0) {
+        return files;
+      }
+    } catch (e) {
+      // Fallback below
+    }
+  }
+
+  return fallbackSetup(spec);
+}
+
+function fallbackSetup(spec: ProjectSpec): PackageFiles {
   const known: string[] = [];
   const unknown: string[] = [];
   for (const [, entry] of lockedEntries(spec)) {
