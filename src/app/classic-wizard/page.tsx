@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
-export default function NewProjectPage() {
+export default function ClassicWizardRedirect() {
   redirect("/new-project/basics?reset=true");
 }

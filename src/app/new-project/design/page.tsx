@@ -1,8 +1,13 @@
+"use client";
+
+import { useWizard } from "../wizard-context";
 import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 
 export default function DesignPage() {
+  const { state, updateState } = useWizard();
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-16 text-white">
       <WizardBreadcrumb />
@@ -25,6 +30,8 @@ export default function DesignPage() {
           <textarea
             rows={5}
             placeholder="https://duolingo.com, playful rounded UI with bold colors"
+            value={state.designReferences}
+            onChange={(e) => updateState({ designReferences: e.target.value })}
             className="w-full rounded-lg border border-white/[0.10] bg-[#1A1A1A] px-3 py-2 text-sm text-white placeholder:text-[#555] outline-none focus:border-white/[0.20]"
           />
         </div>

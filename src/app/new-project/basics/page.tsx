@@ -1,10 +1,28 @@
-import Link from "next/link";
+"use client";
 
+import { useEffect } from "react";
+import { useWizard } from "../wizard-context";
 import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 
 export default function BasicsPage() {
+  const { state, updateState, resetWizard } = useWizard();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("reset") === "true") {
+        resetWizard();
+        // Clean up the URL search param so refresh doesn't reset it again
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, "", newUrl);
+      }
+    }
+  }, [resetWizard]);
+
+  const isContinueDisabled = !state.projectName.trim() || state.description.trim().length < 10;
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-16 text-white">
       <WizardBreadcrumb />
@@ -26,6 +44,8 @@ export default function BasicsPage() {
             <input
               type="text"
               placeholder="LingoQuest"
+              value={state.projectName}
+              onChange={(e) => updateState({ projectName: e.target.value })}
               className="w-full rounded-lg border border-white/[0.10] bg-[#1A1A1A] px-3 py-2 text-sm text-white placeholder:text-[#555] outline-none focus:border-white/[0.20]"
             />
           </div>
@@ -36,23 +56,20 @@ export default function BasicsPage() {
             <textarea
               rows={4}
               placeholder="A language learning app with AI tutoring..."
+              value={state.description}
+              onChange={(e) => updateState({ description: e.target.value })}
               className="w-full rounded-lg border border-white/[0.10] bg-[#1A1A1A] px-3 py-2 text-sm text-white placeholder:text-[#555] outline-none focus:border-white/[0.20]"
             />
           </div>
         </div>
 
-        <p className="mt-4 text-center text-xs text-[#888]">
-          Or use the{" "}
-          <Link href="/" className="text-white underline underline-offset-2">
-            classic wizard
-          </Link>{" "}
-          to generate a full context package now.
-        </p>
+
       </main>
 
       <WizardBottomNav
         backHref="/dashboard"
         continueHref="/new-project/features"
+        continueDisabled={isContinueDisabled}
       />
     </div>
   );

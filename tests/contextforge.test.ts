@@ -79,15 +79,18 @@ describe("projectspec finalization and package assembly", () => {
       expect(content).not.toContain("[PLACEHOLDER]");
     }
 
-    // Skills only for non-null entries; analytics (not needed) gets none
-    expect(files["skills/clerk/skill.md"]).toBeTruthy();
-    expect(files["skills/clerk/install.md"]).toBeTruthy();
-    expect(files["skills/clerk/env-vars.md"]).toBeTruthy();
+    // Tech stack only for non-null entries; analytics (not needed) goes into notNeeded section
+    expect(files["tech-stack.md"]).toContain("Clerk");
+    expect(files["tech-stack.md"]).toContain("Expo (React Native)");
+    expect(files["tech-stack.md"]).toContain("Categories Not Needed");
     expect(Object.keys(files).some((p) => p.includes("analytics"))).toBe(false);
 
     // Low-confidence skill carries verify warning
-    const novel = files["skills/novelai-engine-x/skill.md"];
-    expect(novel).toContain("LOW CONFIDENCE");
+    const stackJson = JSON.parse(files["tech-stack.json"] || "{}");
+    const novelEntry = stackJson.stack?.find((e: any) => e.name === "NovelAI Engine X");
+    expect(novelEntry).toBeDefined();
+    expect(files["tech-stack.md"]).toContain("NovelAI Engine X");
+    expect(files["tech-stack.md"]).toContain("WARNING - LOW CONFIDENCE");
 
     // One manifest per feature, listing agents.md and the feature's prompts
     for (const feature of draft.features) {
@@ -109,10 +112,10 @@ describe("projectspec finalization and package assembly", () => {
     const { files } = await assemblePackage(spec);
 
     // Clerk install should use @clerk/clerk-expo for mobile platform, not @clerk/nextjs
-    const clerkInstall = files["skills/clerk/install.md"];
-    expect(clerkInstall).toContain("@clerk/clerk-expo");
-    expect(clerkInstall).toContain("expo-web-browser");
-    expect(clerkInstall).toContain("expo-secure-store");
-    expect(clerkInstall).not.toContain("@clerk/nextjs");
+    const techStack = files["tech-stack.md"];
+    expect(techStack).toContain("@clerk/clerk-expo");
+    expect(techStack).toContain("expo-web-browser");
+    expect(techStack).toContain("expo-secure-store");
+    expect(techStack).not.toContain("@clerk/nextjs");
   });
 });

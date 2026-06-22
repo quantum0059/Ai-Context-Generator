@@ -4,7 +4,7 @@ const STEPS = [
   { number: 1, label: "Basics", slug: "basics" },
   { number: 2, label: "Features", slug: "features" },
   { number: 3, label: "Stack", slug: "stack" },
-  { number: 4, label: "Continuous", slug: "continuous" },
+  { number: 4, label: "Constraints", slug: "continuous" },
   { number: 5, label: "Design", slug: "design" },
   { number: 6, label: "Review", slug: "review" },
 ] as const;

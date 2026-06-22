@@ -73,38 +73,31 @@ export async function regeneratePackage(
   for (const feature of removedFeatures) {
     const slug = slugify(feature);
     for (const path of Object.keys(files)) {
-      if (path.startsWith(`prompts/${slug}/`) || path === `context-manifests/${slug}.json`) {
+      if (
+        path.startsWith(`prompts/${slug}/`) ||
+        path === `context-manifests/${slug}.json` ||
+        path === `context-manifests/${slug}-guide.md`
+      ) {
         delete files[path];
         removed.push(path);
       }
     }
   }
 
-  // --- Stack changes: swap affected skills, rebuild ADRs/resources/setup/templates ---
+  // --- Stack changes: rebuild tech-stack, ADRs, resources, setup, templates ---
   if (stackChanged) {
-    for (const category of changedCategories) {
-      const oldValue = oldSpec.stack[category]?.value;
-      if (oldValue) {
-        const slug = slugify(oldValue);
-        for (const path of Object.keys(files)) {
-          if (path.startsWith(`skills/${slug}/`)) {
-            delete files[path];
-            removed.push(path);
-          }
-        }
+    // Tech stack is consolidated — regenerate the whole file
+    const allNewSkills = generateSkills(newSpec);
+    // Remove any old skills/ folder files from previous package format
+    for (const path of Object.keys(files)) {
+      if (path.startsWith("skills/")) {
+        delete files[path];
+        removed.push(path);
       }
     }
-    const allNewSkills = generateSkills(newSpec);
-    for (const category of changedCategories) {
-      const value = newSpec.stack[category]?.value;
-      if (!value) continue;
-      const slug = slugify(value);
-      for (const [path, content] of Object.entries(allNewSkills)) {
-        if (path.startsWith(`skills/${slug}/`)) {
-          files[path] = content;
-          changed.add(path);
-        }
-      }
+    for (const [path, content] of Object.entries(allNewSkills)) {
+      files[path] = content;
+      changed.add(path);
     }
     // ADR numbering depends on locked-category order -> rebuild decisions/ fully.
     for (const path of Object.keys(files)) {

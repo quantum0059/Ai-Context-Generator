@@ -10,6 +10,7 @@ import {
   Lock,
 } from "lucide-react";
 
+import { useWizard } from "../wizard-context";
 import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
 import { StackCategoryRow } from "@/components/wizard/stack-category-row";
@@ -174,36 +175,11 @@ type CategoryState = {
 };
 
 export default function StackPage() {
-  const [categories, setCategories] = useState<Record<string, CategoryState>>(
-    () =>
-      Object.fromEntries(
-        CATEGORIES.map((c) => [
-          c.id,
-          { value: c.defaultValue, skipped: false },
-        ]),
-      ),
-  );
+  const { state, updateStackValue, markStackSkipped } = useWizard();
   const [suggestCategory, setSuggestCategory] = useState<string | null>(null);
 
-  function updateValue(id: string, value: string) {
-    setCategories((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], value, skipped: false },
-    }));
-  }
-
-  function markSkipped(id: string) {
-    setCategories((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], skipped: true },
-    }));
-  }
-
   function applySuggestion(id: string, suggestion: SuggestionOption) {
-    setCategories((prev) => ({
-      ...prev,
-      [id]: { value: suggestion.name, skipped: false },
-    }));
+    updateStackValue(id, suggestion.name, "suggested");
   }
 
   const activeCategory = CATEGORIES.find((c) => c.id === suggestCategory);
@@ -232,13 +208,13 @@ export default function StackPage() {
               description={category.description}
               icon={category.icon}
               options={category.options}
-              value={categories[category.id].value}
-              onValueChange={(value) => updateValue(category.id, value)}
+              value={state.stack[category.id]?.value ?? category.defaultValue}
+              onValueChange={(value) => updateStackValue(category.id, value, "user")}
               confirmed={category.confirmed}
-              skipped={categories[category.id].skipped}
+              skipped={state.stack[category.id]?.skipped ?? false}
               showActions={category.showActions !== false}
               onSuggest={() => setSuggestCategory(category.id)}
-              onNotNeeded={() => markSkipped(category.id)}
+              onNotNeeded={() => markStackSkipped(category.id)}
             />
           ))}
         </div>

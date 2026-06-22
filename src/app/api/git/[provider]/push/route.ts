@@ -161,10 +161,11 @@ export async function POST(
 
   // Issue 2: collision-resistant branch name with crypto random suffix
   const randomSuffix = crypto.randomBytes(4).toString("hex"); // 8 hex chars, URL-safe
-  const branchName = `contextforge/update-${Date.now()}-${randomSuffix}`;
+  const baseBranchName = `contextforge/update-${Date.now()}-${randomSuffix}`;
 
   // ---- Assemble + push ----
   let branchCreated = false;
+  let finalBranchName = baseBranchName;
   const gitProvider = getGitProvider(provider);
 
   try {
@@ -178,15 +179,26 @@ export async function POST(
       prefixedFiles[`.contextforge/${path}`] = content;
     }
 
-    // Create feature branch
-    await gitProvider.createBranch(accessToken, repositoryName, branchName, defaultBranch);
+    // Create feature branch — retry once with numeric suffix on collision (422)
+    try {
+      await gitProvider.createBranch(accessToken, repositoryName, finalBranchName, defaultBranch);
+    } catch (branchErr) {
+      const msg = branchErr instanceof Error ? branchErr.message : "";
+      if (msg.includes("(422)")) {
+        // Branch name collision — append numeric suffix and retry once
+        finalBranchName = `${baseBranchName}-2`;
+        await gitProvider.createBranch(accessToken, repositoryName, finalBranchName, defaultBranch);
+      } else {
+        throw branchErr;
+      }
+    }
     branchCreated = true;
 
     // Commit all files in a single batch operation
     await gitProvider.commitFiles(
       accessToken,
       repositoryName,
-      branchName,
+      finalBranchName,
       prefixedFiles,
       "chore: update .contextforge context package",
     );
@@ -195,7 +207,7 @@ export async function POST(
     const { url: prUrl } = await gitProvider.createPullRequest(
       accessToken,
       repositoryName,
-      branchName,
+      finalBranchName,
       defaultBranch,
       "Update .contextforge context package",
     );
@@ -207,7 +219,7 @@ export async function POST(
       spec_id: specId,
       repository_id: repositoryId,
       repository_name: repositoryName,
-      branch_name: branchName,
+      branch_name: finalBranchName,
       pr_url: prUrl,
       status: "success",
     });
@@ -220,7 +232,7 @@ export async function POST(
     // commitFiles or createPullRequest failed
     if (branchCreated) {
       try {
-        await gitProvider.deleteBranch(accessToken, repositoryName, branchName);
+        await gitProvider.deleteBranch(accessToken, repositoryName, finalBranchName);
       } catch {
         // Intentionally swallowed — cleanup is best-effort,
         // must never hide the original error
@@ -235,7 +247,7 @@ export async function POST(
         spec_id: specId,
         repository_id: repositoryId,
         repository_name: repositoryName,
-        branch_name: branchName,
+        branch_name: finalBranchName,
         status: "failed",
         error_message: errorMessage,
       });
@@ -243,6 +255,17 @@ export async function POST(
       // Intentionally swallowed — don't mask the original push error
     }
 
-    return Response.json({ error: errorMessage }, { status: 502 });
+    // Categorize error status codes for better frontend handling
+    let statusCode = 502;
+    if (errorMessage.includes("(401)")) {
+      statusCode = 401; // Token expired / revoked → reconnect required
+    } else if (errorMessage.includes("(403)")) {
+      statusCode = 403; // Permission denied
+    } else if (errorMessage.includes("(429)") || errorMessage.toLowerCase().includes("rate limit")) {
+      statusCode = 429; // Rate limited
+    }
+
+    return Response.json({ error: errorMessage }, { status: statusCode });
   }
 }
+

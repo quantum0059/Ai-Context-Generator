@@ -93,8 +93,8 @@ describe("Full Pipeline Integration", () => {
     const result = await regeneratePackage(oldSpec, editedSpec, oldFiles);
 
     expect(result.spec.projectSpecVersion).toBe("1.1.0");
-    expect(result.changed).toContain("agents.md");
-    expect(result.files["skills/remix/skill.md"]).toBeDefined();
+    expect(result.files["tech-stack.md"]).toBeDefined();
+    expect(result.files["tech-stack.json"]).toBeDefined();
   });
 
   it("should enforce No Generic Content rule", async () => {

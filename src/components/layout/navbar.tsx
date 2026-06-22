@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Menu, Moon, Sun } from "lucide-react";
+import { useAuth, SignInButton, SignOutButton, SignUpButton } from "@clerk/nextjs";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -36,7 +37,7 @@ const productsItems = [
   },
   {
     title: "Templates",
-    href: "#templates",
+    href: "/templates",
     description: "Start from pre-built project templates",
   },
 ];
@@ -60,10 +61,11 @@ const supportItems = [
 ];
 
 const navLinks = [
-  { label: "Docs & Guides", href: "#docs" },
+  { label: "Features", href: "#features" },
+  { label: "How it Works", href: "#how-it-works" },
   { label: "Pricing", href: "#pricing" },
-  { label: "Blog", href: "#blog" },
-  { label: "Examples", href: "#examples" },
+  { label: "Docs", href: "#docs" },
+  { label: "Changelog", href: "#changelog" },
 ];
 
 const navTriggerClass =
@@ -167,19 +169,6 @@ function DesktopNav() {
   return (
     <NavigationMenu className="hidden lg:flex">
       <NavigationMenuList className="gap-1">
-        <NavigationMenuItem>
-          <NavigationMenuTrigger className={navTriggerClass}>
-            Products
-          </NavigationMenuTrigger>
-          <NavigationMenuContent className="border border-white/10 bg-[#0A0A0A] p-0 shadow-xl ring-0">
-            <ul className="w-[300px] p-2">
-              {productsItems.map((item) => (
-                <DropdownLink key={item.title} {...item} />
-              ))}
-            </ul>
-          </NavigationMenuContent>
-        </NavigationMenuItem>
-
         {navLinks.map((link) => (
           <NavigationMenuItem key={link.label}>
             <NavigationMenuLink
@@ -190,19 +179,6 @@ function DesktopNav() {
             </NavigationMenuLink>
           </NavigationMenuItem>
         ))}
-
-        <NavigationMenuItem>
-          <NavigationMenuTrigger className={navTriggerClass}>
-            Support
-          </NavigationMenuTrigger>
-          <NavigationMenuContent className="border border-white/10 bg-[#0A0A0A] p-0 shadow-xl ring-0">
-            <ul className="w-[280px] p-2">
-              {supportItems.map((item) => (
-                <DropdownLink key={item.title} {...item} />
-              ))}
-            </ul>
-          </NavigationMenuContent>
-        </NavigationMenuItem>
       </NavigationMenuList>
     </NavigationMenu>
   );
@@ -211,9 +187,11 @@ function DesktopNav() {
 function MobileNav({
   isDark,
   onToggleTheme,
+  isSignedIn = false,
 }: {
   isDark: boolean;
   onToggleTheme: () => void;
+  isSignedIn?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -242,22 +220,6 @@ function MobileNav({
         </SheetHeader>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-4 py-4">
-          <p className="px-3 py-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
-            Products
-          </p>
-          {productsItems.map((item) => (
-            <Link
-              key={item.title}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="rounded-lg px-3 py-2.5 text-sm text-neutral-400 transition-colors hover:text-white"
-            >
-              {item.title}
-            </Link>
-          ))}
-
-          <div className="my-2 border-t border-white/10" />
-
           {navLinks.map((link) => (
             <Link
               key={link.label}
@@ -268,30 +230,16 @@ function MobileNav({
               {link.label}
             </Link>
           ))}
-
-          <p className="mt-2 px-3 py-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
-            Support
-          </p>
-          {supportItems.map((item) => (
-            <Link
-              key={item.title}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="rounded-lg px-3 py-2.5 text-sm text-neutral-400 transition-colors hover:text-white"
-            >
-              {item.title}
-            </Link>
-          ))}
         </nav>
 
         <div className="flex items-center gap-3 border-t border-white/10 p-4">
           <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
           <Button
-            render={<Link href="/new-project/basics" />}
+            render={<Link href={isSignedIn ? "/dashboard" : "/new-project/basics?reset=true"} />}
             onClick={() => setOpen(false)}
             className="flex-1 rounded-full bg-white font-medium text-neutral-900 hover:bg-white/90"
           >
-            Get Started Free
+            {isSignedIn ? "Go to Dashboard" : "Get Started Free"}
           </Button>
         </div>
       </SheetContent>
@@ -299,12 +247,88 @@ function MobileNav({
   );
 }
 
+function ClerkAuthButtons() {
+  const { isSignedIn } = useAuth();
+
+  if (isSignedIn) {
+    return (
+      <>
+        <SignOutButton redirectUrl="/">
+          <Button
+            variant="ghost"
+            className="hidden rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 shadow-none hover:bg-transparent hover:text-white lg:inline-flex"
+          >
+            Sign Out
+          </Button>
+        </SignOutButton>
+        <Button
+          render={<Link href="/dashboard" />}
+          className="hidden rounded-full bg-white px-5 font-medium text-neutral-900 hover:bg-white/90 lg:inline-flex"
+        >
+          Go to Dashboard
+        </Button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SignInButton mode="modal" forceRedirectUrl="/new-project/basics?reset=true">
+        <Button
+          variant="ghost"
+          className="hidden rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 shadow-none hover:bg-transparent hover:text-white lg:inline-flex"
+        >
+          Sign In
+        </Button>
+      </SignInButton>
+      <SignUpButton forceRedirectUrl="/new-project/basics?reset=true" mode="modal">
+        <Button
+          className="hidden rounded-full bg-white px-5 font-medium text-neutral-900 hover:bg-white/90 lg:inline-flex"
+        >
+          Get Started Free
+        </Button>
+      </SignUpButton>
+    </>
+  );
+}
+
+function DefaultAuthButtons() {
+  return (
+    <>
+      <Link
+        href="/new-project/basics?reset=true"
+        className="hidden rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition-colors hover:text-white lg:inline-flex"
+      >
+        Sign In
+      </Link>
+      <Button
+        render={<Link href="/new-project/basics?reset=true" />}
+        className="hidden rounded-full bg-white px-5 font-medium text-neutral-900 hover:bg-white/90 lg:inline-flex"
+      >
+        Get Started Free
+      </Button>
+    </>
+  );
+}
+
+function ClerkMobileNav({
+  isDark,
+  onToggleTheme,
+}: {
+  isDark: boolean;
+  onToggleTheme: () => void;
+}) {
+  const { isSignedIn } = useAuth();
+  return <MobileNav isDark={isDark} onToggleTheme={onToggleTheme} isSignedIn={isSignedIn} />;
+}
+
 export default function Navbar() {
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const isWizardRoute = pathname.startsWith("/new-project");
-  const isDashboardAppRoute = pathname.startsWith("/dashboard/projects");
+  const isDashboardRoute = pathname.startsWith("/dashboard");
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -330,7 +354,7 @@ export default function Navbar() {
     });
   }
 
-  if (isWizardRoute || isDashboardAppRoute) {
+  if (isWizardRoute || isDashboardRoute) {
     return null;
   }
 
@@ -349,18 +373,17 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-2">
-          <ThemeToggle
-            isDark={isDark}
-            onToggle={toggleTheme}
-            className="hidden lg:inline-flex"
-          />
-          <Button
-            render={<Link href="/new-project/basics" />}
-            className="hidden rounded-full bg-white px-5 font-medium text-neutral-900 hover:bg-white/90 lg:inline-flex"
-          >
-            Get Started Free
-          </Button>
-          <MobileNav isDark={isDark} onToggleTheme={toggleTheme} />
+          {clerkEnabled ? (
+            <>
+              <ClerkAuthButtons />
+              <ClerkMobileNav isDark={isDark} onToggleTheme={toggleTheme} />
+            </>
+          ) : (
+            <>
+              <DefaultAuthButtons />
+              <MobileNav isDark={isDark} onToggleTheme={toggleTheme} />
+            </>
+          )}
         </div>
       </div>
     </header>

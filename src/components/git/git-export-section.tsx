@@ -40,6 +40,17 @@ const PROVIDER_ICONS: Record<Provider, string> = {
   gitlab: "🦊",
 };
 
+/** Human-readable labels for OAuth error reason codes from query params. */
+const REASON_LABELS: Record<string, string> = {
+  missing_params: "Missing authorization parameters",
+  invalid_state: "Invalid or expired authorization state (CSRF check failed)",
+  auth_failed: "Authentication with the provider failed",
+  db_unavailable: "Database is temporarily unavailable",
+  db_error: "Failed to save connection to the database",
+  config_missing: "Git provider is not configured on this server",
+  not_signed_in: "You must sign in before connecting a Git provider",
+};
+
 export function GitExportSection({ specId }: GitExportSectionProps) {
   const [providers, setProviders] = useState<Record<Provider, ProviderState>>({
     github: { ...INITIAL_STATE },
@@ -131,7 +142,17 @@ export function GitExportSection({ specId }: GitExportSectionProps) {
       });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
-        throw new Error(data.error ?? "Push failed.");
+        const errorMsg = data.error ?? "Push failed.";
+        // If 401 (token expired) → mark as disconnected so reconnect link appears
+        if (res.status === 401) {
+          updateProvider(p, {
+            phase: "error",
+            error: errorMsg,
+            connected: false,
+          });
+          return;
+        }
+        throw new Error(errorMsg);
       }
       const data = (await res.json()) as { prUrl: string };
       updateProvider(p, { phase: "done", prUrl: data.prUrl });
@@ -299,16 +320,37 @@ export function GitExportSection({ specId }: GitExportSectionProps) {
         {/* Error */}
         {state.phase === "error" && state.error && (
           <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-            {state.error}
-            <button
-              type="button"
-              className="ml-3 text-xs underline"
-              onClick={() =>
-                updateProvider(p, { phase: "idle", error: null })
-              }
-            >
-              Dismiss
-            </button>
+            <p>{state.error}</p>
+            <div className="mt-2 flex items-center gap-3">
+              {/* If disconnected (e.g. 401), show reconnect link */}
+              {!state.connected && (
+                <a
+                  href={`/api/git/${p}/connect`}
+                  className="text-xs font-semibold text-indigo-600 hover:underline"
+                >
+                  Reconnect {label}
+                </a>
+              )}
+              {/* Retry — resets to picking phase so user can re-attempt */}
+              {state.connected && state.selectedRepo && (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-indigo-600 hover:underline"
+                  onClick={() => void handlePush(p)}
+                >
+                  Retry
+                </button>
+              )}
+              <button
+                type="button"
+                className="text-xs text-slate-500 hover:underline"
+                onClick={() =>
+                  updateProvider(p, { phase: "idle", error: null })
+                }
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -336,7 +378,7 @@ export function GitExportSection({ specId }: GitExportSectionProps) {
         >
           {oauthMessage.status === "success"
             ? `${PROVIDER_LABELS[oauthMessage.provider as Provider] ?? oauthMessage.provider} connected successfully!`
-            : `Failed to connect ${PROVIDER_LABELS[oauthMessage.provider as Provider] ?? oauthMessage.provider}${oauthMessage.reason ? `: ${oauthMessage.reason}` : ""}.`}
+            : `Failed to connect ${PROVIDER_LABELS[oauthMessage.provider as Provider] ?? oauthMessage.provider}${oauthMessage.reason ? `: ${REASON_LABELS[oauthMessage.reason] ?? oauthMessage.reason}` : ""}.`}
           <button
             type="button"
             className="ml-2 underline"

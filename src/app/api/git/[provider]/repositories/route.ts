@@ -64,6 +64,13 @@ export async function GET(
     return Response.json({ repositories });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to list repositories.";
+    // Detect 401 from provider → surface as reconnect-required
+    if (message.includes("(401)")) {
+      return Response.json(
+        { error: "Your connection has expired. Please reconnect.", code: "RECONNECT_REQUIRED" },
+        { status: 401 },
+      );
+    }
     return Response.json({ error: message }, { status: 502 });
   }
 }
@@ -147,6 +154,13 @@ export async function POST(
     return Response.json({ repository }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create repository.";
+    // Detect 401 from provider → surface as reconnect-required
+    if (message.includes("(401)")) {
+      return Response.json(
+        { error: "Your connection has expired. Please reconnect.", code: "RECONNECT_REQUIRED" },
+        { status: 401 },
+      );
+    }
     return Response.json({ error: message }, { status: 502 });
   }
 }

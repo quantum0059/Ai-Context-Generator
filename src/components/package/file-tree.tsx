@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
 
 type TreeNodeType = "folder" | "file";
@@ -8,62 +8,62 @@ type TreeNodeType = "folder" | "file";
 interface TreeNode {
   name: string;
   type: TreeNodeType;
+  path?: string;
   expandable?: boolean;
   children?: TreeNode[];
 }
 
-const treeData: TreeNode[] = [
-  {
-    name: "ai-chat-ems-platform-package/",
+function buildTree(files: Record<string, string>, projectName: string): TreeNode[] {
+  if (!files || Object.keys(files).length === 0) return [];
+
+  const rootNode: TreeNode = {
+    name: `${projectName || "project"}/`,
     type: "folder",
     expandable: true,
-    children: [
-      {
-        name: "prompts/",
-        type: "folder",
-        expandable: true,
-        children: [
-          { name: "system-prompts/", type: "folder" },
-          { name: "workflow/", type: "folder" },
-          { name: "templates/", type: "folder" },
-          { name: "responses/", type: "folder" },
-        ],
-      },
-      {
-        name: "data/",
-        type: "folder",
-        expandable: true,
-        children: [
-          { name: "department-data.json", type: "file" },
-          { name: "user-permissions.csv", type: "file" },
-          { name: "role-mappings.json", type: "file" },
-          { name: "reference-data.csv", type: "file" },
-        ],
-      },
-      {
-        name: "database/",
-        type: "folder",
-        expandable: true,
-        children: [
-          { name: "ems.db", type: "file" },
-          { name: "migrations/", type: "folder" },
-          { name: "seeds.sql", type: "file" },
-          { name: "backup (latest).sql", type: "file" },
-        ],
-      },
-    ],
-  },
-];
+    children: [],
+  };
 
-function FolderNode({
-  node,
-  level,
-  bulletType,
-}: {
+  for (const filePath of Object.keys(files)) {
+    const parts = filePath.split("/");
+    let currentLevel = rootNode.children!;
+    let currentPath = "";
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isFile = i === parts.length - 1;
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+      let existingNode = currentLevel.find((n) => n.name === (isFile ? part : `${part}/`));
+
+      if (!existingNode) {
+        existingNode = {
+          name: isFile ? part : `${part}/`,
+          type: isFile ? "file" : "folder",
+          path: isFile ? currentPath : undefined,
+          expandable: !isFile,
+          children: isFile ? undefined : [],
+        };
+        currentLevel.push(existingNode);
+      }
+
+      if (!isFile) {
+        currentLevel = existingNode.children!;
+      }
+    }
+  }
+
+  return [rootNode];
+}
+
+interface FolderNodeProps {
   node: TreeNode;
   level: number;
   bulletType: "chevron" | "square" | "none";
-}) {
+  selectedFile?: string | null;
+  onSelectFile?: (path: string) => void;
+}
+
+function FolderNode({ node, level, bulletType, selectedFile, onSelectFile }: FolderNodeProps) {
   const [expanded, setExpanded] = useState(true);
 
   const paddingLeft = level * 16;
@@ -102,7 +102,8 @@ function FolderNode({
               key={child.name}
               node={child}
               level={level + 1}
-              parentIsFolder={true}
+              selectedFile={selectedFile}
+              onSelectFile={onSelectFile}
             />
           ))}
         </div>
@@ -111,58 +112,95 @@ function FolderNode({
   );
 }
 
-function FileNode({ node, level }: { node: TreeNode; level: number }) {
+interface FileNodeProps {
+  node: TreeNode;
+  level: number;
+  selectedFile?: string | null;
+  onSelectFile?: (path: string) => void;
+}
+
+function FileNode({ node, level, selectedFile, onSelectFile }: FileNodeProps) {
   const paddingLeft = level * 16;
+  const isSelected = selectedFile === node.path;
 
   return (
-    <div
-      className="flex items-center gap-1.5 px-1 py-0.5 text-[13px] text-[#CCCCCC]"
+    <button
+      onClick={() => {
+        if (node.path && onSelectFile) {
+          onSelectFile(node.path);
+        }
+      }}
+      className={`flex w-full cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-left text-[13px] transition-colors ${
+        isSelected ? "bg-white/10 text-white" : "text-[#CCCCCC] hover:bg-[rgba(255,255,255,0.04)]"
+      }`}
       style={{ paddingLeft: `${paddingLeft}px` }}
     >
       <span className="text-[rgba(255,255,255,0.20)]">—</span>
-      <File className="size-3.5 shrink-0 text-[#888]" />
+      <File className={`size-3.5 shrink-0 ${isSelected ? "text-emerald-400" : "text-[#888]"}`} />
       <span>{node.name}</span>
-    </div>
+    </button>
   );
 }
 
-function TreeItem({
-  node,
-  level,
-  parentIsFolder,
-}: {
+interface TreeItemProps {
   node: TreeNode;
   level: number;
-  parentIsFolder?: boolean;
-}) {
+  selectedFile?: string | null;
+  onSelectFile?: (path: string) => void;
+}
+
+function TreeItem({ node, level, selectedFile, onSelectFile }: TreeItemProps) {
   if (node.type === "folder") {
     const bulletType: "chevron" | "square" | "none" =
       level === 1 ? "square" : node.expandable ? "chevron" : "none";
-    return <FolderNode node={node} level={level} bulletType={bulletType} />;
+    return (
+      <FolderNode
+        node={node}
+        level={level}
+        bulletType={bulletType}
+        selectedFile={selectedFile}
+        onSelectFile={onSelectFile}
+      />
+    );
   }
-  return <FileNode node={node} level={level} />;
+  return <FileNode node={node} level={level} selectedFile={selectedFile} onSelectFile={onSelectFile} />;
 }
 
-export function FileTree({ highlight = false }: { highlight?: boolean } = {}) {
+export interface FileTreeProps {
+  highlight?: boolean;
+  files?: Record<string, string>;
+  projectName?: string;
+  selectedFile?: string | null;
+  onSelectFile?: (path: string) => void;
+}
+
+export function FileTree({ highlight = false, files = {}, projectName = "project", selectedFile, onSelectFile }: FileTreeProps) {
+  const treeData = useMemo(() => buildTree(files, projectName), [files, projectName]);
+
   return (
     <div
-      className={`rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#111111] p-5 transition-all duration-300 ${
+      className={`rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#111111] p-5 h-full max-h-[600px] overflow-y-auto transition-all duration-300 ${
         highlight ? "ring-1 ring-white/20 animate-pulse" : ""
       }`}
     >
       <h3 className="mb-4 text-[15px] font-semibold text-white">Package Structure</h3>
 
-      <div className="font-mono leading-[2]">
-        {treeData.map((node) => (
-          <TreeItem key={node.name} node={node} level={0} />
-        ))}
-
-        {/* Collapsed placeholder */}
-        <div className="flex items-center gap-1.5 py-0.5 pl-4 text-[13px] text-[#CCCCCC]">
-          <ChevronRight className="size-3 shrink-0 text-[#888]" />
-          <span className="text-[#888]">...</span>
+      {treeData.length === 0 ? (
+        <div className="text-[13px] text-[#888] py-4">No files available</div>
+      ) : (
+        <div className="font-mono leading-[2]">
+          {treeData.map((node) => (
+            <TreeItem
+              key={node.name}
+              node={node}
+              level={0}
+              selectedFile={selectedFile}
+              onSelectFile={onSelectFile}
+            />
+          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }
+

@@ -60,8 +60,8 @@ ${spec.constraints.avoid?.length ? `- Do NOT use: ${spec.constraints.avoid.join(
 ${lowConfSection}
 
 ## When stuck
-- \`skills/<technology>/skill.md\` for technology-specific guidance.
+- \`tech-stack.md\` for complete technology reference, setup details, and best practices.
 - \`decisions/\` for why choices were made.
-- \`context-manifests/${spec.features[0] ? slugify(spec.features[0]) : "<feature>"}.json\` for exactly what to load before working on a feature.
+- \`context-manifests/${spec.features[0] ? slugify(spec.features[0]) : "<feature>"}-guide.md\` for a human-readable guide on what to load before working on a feature.
 `;
 }

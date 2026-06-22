@@ -14,7 +14,7 @@ const actions = [
     title: "Create New Project",
     subtitle: "Start from scratch with AI context",
     icon: Plus,
-    href: "/new-project/basics",
+    href: "/new-project/basics?reset=true",
   },
   {
     title: "Import Project",
@@ -26,7 +26,7 @@ const actions = [
     title: "Explore Templates",
     subtitle: "Browse pre-built project templates",
     icon: LayoutGrid,
-    href: "#templates",
+    href: "/templates",
   },
   {
     title: "Invite Team Members",

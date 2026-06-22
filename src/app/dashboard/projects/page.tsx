@@ -222,7 +222,7 @@ export default function ProjectsPage() {
 
           {/* New Project */}
           <button
-            onClick={() => router.push("/new-project/basics")}
+            onClick={() => router.push("/new-project/basics?reset=true")}
             className="flex h-10 items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.15)] bg-[#1A1A1A] px-4 text-sm font-medium text-white transition-colors hover:bg-[rgba(255,255,255,0.08)]"
           >
             <Plus className="size-4" />

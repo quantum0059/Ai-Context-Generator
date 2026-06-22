@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useUser } from "@clerk/nextjs";
 import {
   BookOpen,
   Building2,
   ChevronDown,
   CreditCard,
-  Grid2x2,
+  FolderOpen,
   LayoutDashboard,
   LayoutTemplate,
-  Plug,
+  Package,
+  Plus,
   Settings,
   Users,
 } from "lucide-react";
@@ -18,11 +20,10 @@ import { cn } from "@/lib/utils";
 
 export type SidebarActiveItem =
   | "projects"
+  | "new-project"
   | "templates"
-  | "members"
-  | "components"
-  | "workspaces"
-  | "integrations"
+  | "my-packages"
+  | "shared"
   | "settings"
   | "billing"
   | "documentation";
@@ -35,16 +36,15 @@ interface NavItemDef {
 }
 
 const mainNavItems: NavItemDef[] = [
-  { id: "projects", label: "Projects", href: "/dashboard/projects", icon: LayoutDashboard },
-  { id: "templates", label: "Templates", href: "#templates", icon: LayoutTemplate },
-  { id: "members", label: "Members", href: "#members", icon: Users },
-  { id: "components", label: "Components", href: "#components", icon: Grid2x2 },
-  { id: "workspaces", label: "Workspaces", href: "#workspaces", icon: Building2 },
-  { id: "integrations", label: "Integrations", href: "#integrations", icon: Plug },
+  { id: "projects", label: "Projects", href: "/dashboard/projects", icon: FolderOpen },
+  { id: "new-project", label: "New Project", href: "/new-project/basics?reset=true", icon: Plus },
+  { id: "templates", label: "Templates", href: "/templates", icon: LayoutTemplate },
+  { id: "my-packages", label: "My Packages", href: "#my-packages", icon: Package },
+  { id: "shared", label: "Shared with me", href: "#shared", icon: Users },
+  { id: "settings", label: "Settings", href: "#settings", icon: Settings },
 ];
 
 const bottomNavItems: NavItemDef[] = [
-  { id: "settings", label: "Settings", href: "#settings", icon: Settings },
   { id: "billing", label: "Billing", href: "#billing", icon: CreditCard },
   { id: "documentation", label: "Documentation", href: "#docs", icon: BookOpen },
 ];
@@ -88,17 +88,37 @@ function NavItem({
 }
 
 function UserProfile() {
+  const { user, isLoaded } = useUser();
+
+  if (!isLoaded || !user) {
+    return (
+      <div className="border-t border-[rgba(255,255,255,0.08)] p-4">
+        <div className="flex items-center gap-2.5 rounded-lg px-1 py-1.5">
+          <div className="size-9 shrink-0 rounded-full bg-[#1a1a1a] animate-pulse" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="h-3 w-20 rounded bg-[#1a1a1a] animate-pulse" />
+            <div className="h-2 w-32 rounded bg-[#1a1a1a] animate-pulse" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-t border-[rgba(255,255,255,0.08)] p-4">
       <div className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 transition-colors hover:bg-[rgba(255,255,255,0.04)]">
         <img
-          src="https://i.pravatar.cc/36"
+          src={user.imageUrl || "https://i.pravatar.cc/36"}
           alt="Avatar"
           className="size-9 shrink-0 rounded-full object-cover"
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-white">Alex Johnson</p>
-          <p className="truncate text-xs text-[#888]">alex@contextforge.com</p>
+          <p className="truncate text-[13px] font-medium text-white">
+            {user.fullName || "Guest User"}
+          </p>
+          <p className="truncate text-xs text-[#888]">
+            {user.primaryEmailAddress?.emailAddress || ""}
+          </p>
         </div>
         <ChevronDown className="size-4 shrink-0 text-[#888]" />
       </div>

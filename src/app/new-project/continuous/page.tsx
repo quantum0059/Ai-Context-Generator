@@ -1,8 +1,13 @@
+"use client";
+
+import { useWizard } from "../wizard-context";
 import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 
 export default function ContinuousPage() {
+  const { state, updateState } = useWizard();
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-16 text-white">
       <WizardBreadcrumb />
@@ -24,6 +29,8 @@ export default function ContinuousPage() {
             <input
               type="text"
               placeholder="Free tiers only / up to $50 per month"
+              value={state.budget}
+              onChange={(e) => updateState({ budget: e.target.value })}
               className="w-full rounded-lg border border-white/[0.10] bg-[#1A1A1A] px-3 py-2 text-sm text-white placeholder:text-[#555] outline-none focus:border-white/[0.20]"
             />
           </div>
@@ -34,6 +41,8 @@ export default function ContinuousPage() {
             <input
               type="text"
               placeholder="Firebase, Redux"
+              value={state.avoid}
+              onChange={(e) => updateState({ avoid: e.target.value })}
               className="w-full rounded-lg border border-white/[0.10] bg-[#1A1A1A] px-3 py-2 text-sm text-white placeholder:text-[#555] outline-none focus:border-white/[0.20]"
             />
           </div>

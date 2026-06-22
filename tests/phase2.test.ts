@@ -61,14 +61,12 @@ describe("selective regeneration", () => {
     expect(result.spec.projectSpecVersion).toBe("1.1.0");
     expect(result.meta.packageVersion).toBe("1.1.0");
 
-    // Changed stack: old skills removed, new ones added
-    expect(Object.keys(result.files).some((p) => p.startsWith("skills/clerk/"))).toBe(false);
-    expect(result.files["skills/auth0/skill.md"]).toBeTruthy();
+    // Changed stack: tech-stack.md is regenerated with new entries
+    expect(result.files["tech-stack.md"]).toContain("Auth0");
+    expect(result.files["tech-stack.md"]).not.toContain("Clerk");
 
-    // Unrelated skill package carried over byte-for-byte
-    expect(result.files["skills/expo-react-native/skill.md"]).toBe(
-      oldFiles["skills/expo-react-native/skill.md"],
-    );
+    // Unchanged components are still present
+    expect(result.files["tech-stack.md"]).toContain("Expo (React Native)");
 
     // New feature got prompts + manifest; existing feature prompts untouched
     expect(Object.keys(result.files).some((p) => p.startsWith("prompts/leaderboards/"))).toBe(true);

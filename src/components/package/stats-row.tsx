@@ -8,14 +8,6 @@ interface StatItem {
   label: string;
 }
 
-const stats: StatItem[] = [
-  { value: 24, label: "Total Files" },
-  { value: 8, label: "Prompts" },
-  { value: 6, label: "Data" },
-  { value: 3, label: "Databases" },
-  { value: 3.35, suffix: " MB", label: "Package Size" },
-];
-
 function useAnimatedCounter(target: number, duration: number = 800) {
   const [current, setCurrent] = useState(0);
 
@@ -54,7 +46,31 @@ function StatCell({ stat }: { stat: StatItem }) {
   );
 }
 
-export function PackageStatsRow() {
+export function PackageStatsRow({ files = {} }: { files?: Record<string, string> }) {
+  const filePaths = Object.keys(files);
+  const totalFiles = filePaths.length;
+  
+  const totalSizeStr = filePaths.reduce((acc, path) => acc + (files[path]?.length || 0), 0);
+  const totalSizeMB = parseFloat((totalSizeStr / 1024 / 1024).toFixed(2));
+
+  let promptFiles = 0;
+  let dataFiles = 0;
+  let codeFiles = 0;
+
+  for (const p of filePaths) {
+    if (p.includes("prompts/")) promptFiles++;
+    else if (p.includes("data/") || p.endsWith(".json") || p.endsWith(".csv")) dataFiles++;
+    else codeFiles++;
+  }
+
+  const stats: StatItem[] = [
+    { value: totalFiles, label: "Total Files" },
+    { value: promptFiles, label: "Prompts" },
+    { value: dataFiles, label: "Data" },
+    { value: codeFiles, label: "Code Files" },
+    { value: totalSizeMB, suffix: " MB", label: "Package Size" },
+  ];
+
   return (
     <div
       className="grid grid-cols-5 overflow-hidden rounded-xl"
@@ -66,3 +82,4 @@ export function PackageStatsRow() {
     </div>
   );
 }
+
