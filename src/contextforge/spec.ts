@@ -21,6 +21,8 @@ export const projectSpecSchema = z.object({
   }),
   designReferences: z.array(z.string()).optional(),
   projectSpecVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+  projectType: z.string().optional(),
+  classificationReason: z.string().optional(),
 });
 
 export const draftInputSchema = z.object({
@@ -32,6 +34,8 @@ export const draftInputSchema = z.object({
     .object({ budget: z.string().optional(), avoid: z.array(z.string()).optional() })
     .default({}),
   designReferences: z.array(z.string()).optional(),
+  projectType: z.string().optional(),
+  classificationReason: z.string().optional(),
 });
 
 /**
@@ -55,6 +59,8 @@ export function finalizeProjectSpec(
     constraints: draft.constraints,
     designReferences: draft.designReferences,
     projectSpecVersion: "1.0.0",
+    projectType: draft.projectType,
+    classificationReason: draft.classificationReason,
   };
   const parsed = projectSpecSchema.safeParse(spec);
   if (!parsed.success) {

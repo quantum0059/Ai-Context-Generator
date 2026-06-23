@@ -15,7 +15,9 @@ import type {
   PackageMeta,
   ProjectSpec,
   StackEntry,
+  ConflictItem,
 } from "@/types/projectspec";
+import { detectStackConflicts } from "@/contextforge/conflict-detector";
 
 function split(value: string): string[] {
   return value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
@@ -29,6 +31,10 @@ export default function ReviewPage() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [lastSpec, setLastSpec] = useState<ProjectSpec | null>(null);
   const [lastFiles, setLastFiles] = useState<Record<string, string> | null>(null);
+  const [blockingConflicts, setBlockingConflicts] = useState<ConflictItem[]>([]);
+  const [warnings, setWarnings] = useState<ConflictItem[]>([]);
+  const [bypassedConflicts, setBypassedConflicts] = useState(false);
+  const [dismissedWarnings, setDismissedWarnings] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -88,12 +94,30 @@ export default function ReviewPage() {
 
 
 
-  async function confirmAndGenerate() {
+  async function confirmAndGenerate(override = false) {
+    if (override) setBypassedConflicts(true);
     setBusy(true);
     setError(null);
     setSaveMessage(null);
     try {
       const spec = draftSpec();
+
+      if (!bypassedConflicts && !override) {
+        setBlockingConflicts([]);
+        setWarnings([]);
+        const report = await detectStackConflicts(spec);
+        
+        if (report.hasWarnings) {
+          setWarnings(report.warnings);
+        }
+        
+        if (report.hasBlockingConflicts) {
+          setBlockingConflicts(report.conflicts);
+          setBusy(false);
+          return;
+        }
+      }
+
       const res = await fetch("/api/contextforge/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -273,14 +297,64 @@ export default function ReviewPage() {
 
           {/* Action Trigger */}
           {!generated && (
-            <div className="flex justify-center">
-              <Button
-                disabled={busy || !isConfigured}
-                onClick={confirmAndGenerate}
-                className="h-11 rounded-lg bg-white px-8 font-semibold text-[#0A0A0A] hover:bg-white/90 disabled:opacity-50"
-              >
-                {busy ? "Generating Context Package..." : "Confirm, Lock Spec & Generate"}
-              </Button>
+            <div className="space-y-4">
+              {warnings.length > 0 && !dismissedWarnings && (
+                <div className="rounded-lg border border-yellow-900 bg-yellow-950/30 p-4 text-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <p className="text-yellow-500 font-semibold">⚠️ Stack Warnings</p>
+                    <button onClick={() => setDismissedWarnings(true)} className="text-[#888] hover:text-white text-xs">Dismiss</button>
+                  </div>
+                  <ul className="space-y-2">
+                    {warnings.map((w, i) => (
+                      <li key={i} className="text-[#ccc] text-xs">
+                        <strong className="text-white">{w.offendingTool}:</strong> {w.description}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {blockingConflicts.length > 0 ? (
+                <div className="rounded-lg border border-red-900 bg-red-950/30 p-4 text-sm">
+                  <p className="text-red-500 font-bold mb-3">⛔ Generation Blocked: Stack Conflicts Detected</p>
+                  <ul className="space-y-4 mb-4">
+                    {blockingConflicts.map((c, i) => (
+                      <li key={i} className="text-[#ccc] text-xs bg-red-950/50 p-3 rounded">
+                        <div className="font-semibold text-white mb-1">⛔ {c.offendingTool}: {c.description}</div>
+                        <div className="mb-1 text-[#aaa]">Required by: <span className="italic text-[#888]">'{c.conflictingRequirement}'</span></div>
+                        <div className="text-red-400">Fix: Replace with {c.suggestion}</div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex flex-col gap-3">
+                    <Button
+                      onClick={() => router.push("/new-project/stack")}
+                      className="w-full h-10 rounded bg-red-600 font-semibold text-white hover:bg-red-700"
+                    >
+                      Fix Stack
+                    </Button>
+                    <Button
+                      onClick={() => confirmAndGenerate(true)}
+                      className="w-full h-10 rounded border border-red-900/50 bg-transparent font-semibold text-[#888] hover:text-white hover:bg-white/5"
+                    >
+                      Generate Anyway
+                    </Button>
+                    <p className="text-center text-[10px] text-[#666]">
+                      You are generating despite conflicts. The output may not match your requirements.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-center">
+                  <Button
+                    disabled={busy || !isConfigured}
+                    onClick={() => confirmAndGenerate(false)}
+                    className="h-11 rounded-lg bg-white px-8 font-semibold text-[#0A0A0A] hover:bg-white/90 disabled:opacity-50"
+                  >
+                    {busy ? "Generating Context Package..." : "Confirm, Lock Spec & Generate"}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 

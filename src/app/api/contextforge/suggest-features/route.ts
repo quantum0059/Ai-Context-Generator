@@ -5,6 +5,7 @@ const requestSchema = z.object({
   projectName: z.string().min(1),
   description: z.string().min(1),
   platform: z.string().optional(),
+  projectType: z.string().optional(),
 });
 
 const featuresSchema = z.object({
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { projectName, description, platform = "web" } = parsed.data;
+  const { projectName, description, platform = "web", projectType } = parsed.data;
 
   if (!isClaudeConfigured()) {
     const fallback = heuristicFeatures(description, platform);
@@ -84,15 +85,17 @@ export async function POST(req: Request) {
       `You are analyzing a software project to suggest the most relevant features it should have.\n\n` +
         `Project name: ${projectName}\n` +
         `Description: ${description}\n` +
-        `Platform: ${platform}\n\n` +
+        `Platform: ${platform}\n` +
+        (projectType ? `Project Classification: ${projectType}\n\n` : `\n`) +
         `Based on this specific project, suggest 6-10 features that would be most relevant and valuable. ` +
         `Think about what this particular type of application needs - do NOT suggest generic features that would apply to any app. ` +
-        `Tailor each feature to the project's actual purpose.\n\n` +
+        `Tailor each feature to the project's actual purpose. If this is a HEADLESS_ENGINE or BACKEND_API, do not suggest UI features like 'User Dashboard'.\n\n` +
         `Return JSON: {"features":[{"name":"Feature Name","description":"Brief description of why this feature matters for THIS project"}]}`,
       featuresSchema,
     );
     return Response.json({ features: result.features, engine: "ai" });
   } catch (err) {
+    console.error("[SuggestFeatures Error]", err);
     const fallback = heuristicFeatures(description, platform);
     return Response.json({
       features: fallback.length > 0 ? fallback : [

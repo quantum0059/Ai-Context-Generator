@@ -28,6 +28,32 @@ export default function FeaturesPage() {
         return;
       }
       try {
+        // Step 1: Discover categories and project type
+        let currentProjectType = state.projectType;
+        if (!currentProjectType) {
+          const discoverRes = await fetch("/api/contextforge/discover", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectName: state.projectName,
+              description: state.description,
+              platform: "web",
+              features: state.features,
+            }),
+          });
+          if (discoverRes.ok) {
+            const discoverData = await discoverRes.json();
+            if (discoverData.projectType) {
+              currentProjectType = discoverData.projectType;
+              updateState({
+                projectType: discoverData.projectType,
+                classificationReason: discoverData.classificationReason,
+              });
+            }
+          }
+        }
+
+        // Step 2: Suggest features with classification context
         const res = await fetch("/api/contextforge/suggest-features", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -35,6 +61,7 @@ export default function FeaturesPage() {
             projectName: state.projectName,
             description: state.description,
             platform: "web",
+            projectType: currentProjectType,
           }),
         });
         const data = await res.json();

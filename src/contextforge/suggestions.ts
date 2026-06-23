@@ -50,10 +50,24 @@ export async function suggestForCategory(
   if (cached) return cached;
 
   const entries = registryFor(category);
+  const techConstraints = draft.constraints.technical || {
+    forbiddenTools: [],
+    forbiddenCategories: [],
+    requiredToolTypes: [],
+    mustBeOffline: false,
+    mustUseLocalStorage: false,
+    rawConstraints: []
+  };
+
+  const eligibleTools = entries.filter(tool => 
+    !techConstraints.forbiddenTools.includes(tool.name) &&
+    !techConstraints.forbiddenCategories.includes(tool.category)
+  );
+
   let result: SuggestionResult;
 
-  if (entries.length > 0) {
-    let ranked = entries.slice(0, 3).map((e) => ({
+  if (eligibleTools.length > 0) {
+    let ranked = eligibleTools.slice(0, 3).map((e) => ({
       name: e.name,
       rationale: `${e.skillGenerationHints} Pros: ${e.pros.join("; ")}.`,
     }));
@@ -63,12 +77,12 @@ export async function suggestForCategory(
           `Rank the best 2-3 tools for the "${category}" category of this project and explain why per option.\n` +
             `Project: ${draft.description}\nPlatform: ${draft.platform}\nFeatures: ${draft.features.join(", ")}\n` +
             `Budget: ${draft.constraints.budget ?? "unspecified"}\nAvoid: ${(draft.constraints.avoid ?? []).join(", ") || "nothing"}\n` +
-            `You MUST choose only from these candidates: ${entries.map((e) => e.name).join(", ")}.\n` +
+            `You MUST choose only from these candidates: ${eligibleTools.map((e) => e.name).join(", ")}.\n` +
             `Return JSON: {"candidates":[{"name":"...","rationale":"..."}]}`,
           tier1Schema,
         );
         const valid = r.candidates.filter((c) =>
-          entries.some((e) => e.name.toLowerCase() === c.name.toLowerCase()),
+          eligibleTools.some((e) => e.name.toLowerCase() === c.name.toLowerCase()),
         );
         if (valid.length > 0) ranked = valid;
       } catch {
@@ -79,7 +93,7 @@ export async function suggestForCategory(
       category,
       tier: "registry",
       candidates: ranked.map((c) => {
-        const entry = entries.find((e) => e.name.toLowerCase() === c.name.toLowerCase());
+        const entry = eligibleTools.find((e) => e.name.toLowerCase() === c.name.toLowerCase());
         return {
           name: entry?.name ?? c.name,
           rationale: c.rationale,
@@ -93,12 +107,29 @@ export async function suggestForCategory(
     };
   } else if (isClaudeConfigured()) {
     try {
+      const isRequired = techConstraints.requiredToolTypes.some(t => 
+        t.toLowerCase().includes(category.toLowerCase()) || 
+        category.toLowerCase().includes(t.toLowerCase()) ||
+        t.toLowerCase().replace(/[^a-z0-9]/g, '') === category.toLowerCase().replace(/[^a-z0-9]/g, '')
+      );
+
+      let prompt = `Suggest 2-3 real, currently-maintained tools for the "${category}" category of this project.\n` +
+        `Project: ${draft.description}\nPlatform: ${draft.platform}\nFeatures: ${draft.features.join(", ")}\n` +
+        `Budget: ${draft.constraints.budget ?? "unspecified"}\nAvoid: ${(draft.constraints.avoid ?? []).join(", ") || "nothing"}\n`;
+
+      if (isRequired && techConstraints.mustBeOffline) {
+        prompt += `Suggest an offline, locally-running tool for ${category}. It must not require internet access.\n`;
+      }
+
+      if (techConstraints.forbiddenTools.length > 0) {
+        prompt += `Forbidden tools: ${techConstraints.forbiddenTools.join(', ')}\n`;
+      }
+
+      prompt += `For each: name, rationale, docsUrl if you are sure of it, and confidence "high" only if you are certain the tool is current and well-maintained, otherwise "low".\n` +
+        `Return JSON: {"candidates":[{"name":"...","rationale":"...","docsUrl":"...","confidence":"high|low"}]}`;
+
       const r = await claudeJson(
-        `Suggest 2-3 real, currently-maintained tools for the "${category}" category of this project.\n` +
-          `Project: ${draft.description}\nPlatform: ${draft.platform}\nFeatures: ${draft.features.join(", ")}\n` +
-          `Budget: ${draft.constraints.budget ?? "unspecified"}\nAvoid: ${(draft.constraints.avoid ?? []).join(", ") || "nothing"}\n` +
-          `For each: name, rationale, docsUrl if you are sure of it, and confidence "high" only if you are certain the tool is current and well-maintained, otherwise "low".\n` +
-          `Return JSON: {"candidates":[{"name":"...","rationale":"...","docsUrl":"...","confidence":"high|low"}]}`,
+        prompt,
         tier2Schema,
       );
       result = {

@@ -22,9 +22,11 @@ export interface ProjectSpec {
   features: string[];
   requiredCategories: string[];
   stack: Record<string, StackEntry>;
-  constraints: { budget?: string; avoid?: string[] };
+  constraints: { budget?: string; avoid?: string[]; technical?: ProjectConstraints };
   designReferences?: string[];
   projectSpecVersion: string;
+  projectType?: string;
+  classificationReason?: string;
 }
 
 /** Pre-discovery draft: what the user has entered in steps 1-2/4-5. */
@@ -33,8 +35,10 @@ export interface DraftInput {
   description: string;
   platform: string;
   features: string[];
-  constraints: { budget?: string; avoid?: string[] };
+  constraints: { budget?: string; avoid?: string[]; technical?: ProjectConstraints };
   designReferences?: string[];
+  projectType?: string;
+  classificationReason?: string;
 }
 
 export interface SuggestionCandidate {
@@ -54,4 +58,29 @@ export interface PackageMeta {
   packageVersion: string;
   projectSpecVersion: string;
   generatedAt: string;
+}
+
+export interface ProjectConstraints {
+  mustBeOffline: boolean;
+  mustUseLocalStorage: boolean;
+  forbiddenCategories: string[];
+  forbiddenTools: string[];
+  requiredToolTypes: string[];
+  rawConstraints: string[];
+}
+
+export interface ConflictItem {
+  severity: "blocking" | "warning";
+  type: string;
+  description: string;
+  offendingTool: string;
+  conflictingRequirement: string;
+  suggestion: string;
+}
+
+export interface ConflictReport {
+  hasBlockingConflicts: boolean;
+  hasWarnings: boolean;
+  conflicts: ConflictItem[];
+  warnings: ConflictItem[];
 }

@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { grokJson, grokText, isGrokConfigured } from "./grok";
+import { groqJson, groqText, isGroqConfigured } from "./groq";
 
 /**
  * ContextForge AI engine: unified provider gateway.
  *
  * Priority order:
  *   1. Anthropic Claude (ANTHROPIC_API_KEY)
- *   2. xAI Grok        (XAI_API_KEY)
+ *   2. Groq            (GROQ_API_KEY)
  *   3. No AI — callers fall back to deterministic heuristics
  *
  * All callers import `isClaudeConfigured` and `claudeJson` from this file.
@@ -14,9 +14,9 @@ import { grokJson, grokText, isGrokConfigured } from "./grok";
  * whichever provider is configured.
  */
 
-/** Returns true if ANY AI backend (Claude or Grok) is configured. */
+/** Returns true if ANY AI backend (Claude or Groq) is configured. */
 export function isClaudeConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY) || isGrokConfigured();
+  return Boolean(process.env.ANTHROPIC_API_KEY) || isGroqConfigured();
 }
 
 function extractJson(text: string): string {
@@ -115,7 +115,7 @@ async function callClaudeText(
 
 /**
  * Sends a prompt to the configured AI provider and validates the response
- * against the given Zod schema. Tries Claude first, then Grok.
+ * against the given Zod schema. Tries Claude first, then Groq.
  *
  * All callers import this as `claudeJson` for backward compatibility.
  */
@@ -128,11 +128,11 @@ export async function claudeJson<T>(
   if (process.env.ANTHROPIC_API_KEY) {
     return callClaude(prompt, schema, retries);
   }
-  // Fallback to Grok
-  if (isGrokConfigured()) {
-    return grokJson(prompt, schema, retries);
+  // Fallback to Groq
+  if (isGroqConfigured()) {
+    return groqJson(prompt, schema, retries);
   }
-  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or XAI_API_KEY.");
+  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.");
 }
 
 /**
@@ -146,10 +146,10 @@ export async function claudeText(
   if (process.env.ANTHROPIC_API_KEY) {
     return callClaudeText(prompt, retries);
   }
-  // Fallback to Grok
-  if (isGrokConfigured()) {
-    return grokText(prompt, retries);
+  // Fallback to Groq
+  if (isGroqConfigured()) {
+    return groqText(prompt, retries);
   }
-  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or XAI_API_KEY.");
+  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.");
 }
 

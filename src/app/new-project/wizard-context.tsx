@@ -10,6 +10,8 @@ export interface WizardState {
   budget: string;
   avoid: string;
   designReferences: string;
+  projectType?: string;
+  classificationReason?: string;
 }
 
 const DEFAULT_STATE: WizardState = {
@@ -27,6 +29,8 @@ const DEFAULT_STATE: WizardState = {
   budget: "",
   avoid: "",
   designReferences: "",
+  projectType: "",
+  classificationReason: "",
 };
 
 interface WizardContextProps {
@@ -68,6 +72,8 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
           budget: spec.constraints?.budget || "",
           avoid: (spec.constraints?.avoid || []).join(", "),
           designReferences: (spec.designReferences || []).join(", "),
+          projectType: spec.projectType || "",
+          classificationReason: spec.classificationReason || "",
         };
         setState(templateState);
         sessionStorage.removeItem("contextforge_template_spec");
