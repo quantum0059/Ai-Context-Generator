@@ -48,6 +48,7 @@ export default function FeaturesPage() {
               updateState({
                 projectType: discoverData.projectType,
                 classificationReason: discoverData.classificationReason,
+                fullCategories: discoverData.fullCategories || [],
               });
             }
           }

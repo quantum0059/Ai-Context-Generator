@@ -26,6 +26,7 @@ interface StackCategoryRowProps {
   showActions?: boolean;
   onSuggest: () => void;
   onNotNeeded: () => void;
+  isCustom?: boolean;
 }
 
 export function StackCategoryRow({
@@ -40,6 +41,7 @@ export function StackCategoryRow({
   showActions = true,
   onSuggest,
   onNotNeeded,
+  isCustom = false,
 }: StackCategoryRowProps) {
   return (
     <div
@@ -58,7 +60,14 @@ export function StackCategoryRow({
         </div>
 
         <div className="min-w-0">
-          <p className="text-[15px] font-medium text-white">{title}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-[15px] font-medium text-white">{title}</p>
+            {isCustom && (
+              <Badge className="h-5 rounded bg-blue-500/10 px-1.5 text-[10px] font-medium text-blue-400 hover:bg-blue-500/10">
+                Custom
+              </Badge>
+            )}
+          </div>
           <p className="mt-0.5 text-[13px] text-[#888]">{description}</p>
         </div>
       </div>

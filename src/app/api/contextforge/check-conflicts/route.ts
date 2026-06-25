@@ -71,7 +71,11 @@ PERFORMANCE CONFLICTS:
 - Project requires CPU-intensive processing (AST parsing, ML inference, video processing) but is built on a framework not suited for it (e.g. Next.js API routes for heavy CPU work)
 
 MISSING CRITICAL TOOLS:
-- Project description requires a specific type of library that is not in the stack (e.g. description mentions AST parsing but no parser library is chosen, description mentions PDF generation but no PDF library is chosen)
+- Only flag a specialized tool as a blocking conflict if ALL of these are true:
+  1. The project description requires it
+  2. No custom category was created for it in the stack
+  3. The user did not manually type it into any stack field
+- If a custom category exists for it AND the user selected a tool for that category, do NOT flag it as a conflict — it's resolved.
 
 LICENSING CONFLICTS:
 - Project states 'open source only' but chosen tool has proprietary license

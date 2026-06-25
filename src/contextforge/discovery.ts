@@ -19,6 +19,15 @@ const discoverySchema = z.object({
       label: z.string(),
       reason: z.string(),
       relevantToProjectType: z.boolean(),
+      isCustom: z.boolean().optional(),
+      suggestedTools: z.array(
+        z.object({
+          name: z.string(),
+          reason: z.string(),
+          installCommand: z.string(),
+          docsUrl: z.string()
+        })
+      ).optional(),
     }),
   ).min(1),
   excludedCategories: z.array(
@@ -75,6 +84,7 @@ export async function discoverCategories(
   engine: "claude" | "heuristic";
   projectType?: string;
   classificationReason?: string;
+  fullCategories?: any[];
 }> {
   const extractedConstraints = await extractProjectConstraints(draft.description, draft.platform);
   draft.constraints.technical = extractedConstraints;
@@ -131,6 +141,38 @@ CRITICAL RULES:
 - Never suggest a category the project does not need
 - A dashboard for a headless engine is a secondary concern, not the primary architecture
   
+When a project requires a specialized technical library that does not fit any standard category (frontend framework, database, auth, state management, styling, AI provider, payments, hosting), you MUST create a custom category for it.
+
+Custom category rules:
+- Create one category per distinct technical concern
+- Name the category key in camelCase (e.g. 'astParser', 'mlRuntime', 'pdfEngine', 'imageProcessor', 'cliFramework', 'testRunner')
+- Set a human-readable label (e.g. 'AST Parser', 'ML Runtime', 'PDF Engine')
+- Include a reason explaining why this project specifically needs it
+- Set isCustom: true so the UI renders it correctly
+- Pre-populate suggestedTools with 2-3 real, installable npm package names or pip package names that solve this need offline if the project requires offline operation
+
+Examples of when to create custom categories:
+- Description mentions 'parse code' or 'AST' or 'syntax tree' → create astParser category
+  suggestedTools: ['tree-sitter', '@babel/parser', 'acorn', 'esprima']
+  
+- Description mentions 'machine learning' or 'local AI model' or 'inference' offline → create mlRuntime category
+  suggestedTools: ['onnxruntime-node', 'tensorflow.js', 'llama-node']
+  
+- Description mentions 'generate PDF' → create pdfEngine category
+  suggestedTools: ['pdfkit', 'puppeteer', 'jspdf']
+  
+- Description mentions 'CLI' or 'command line' or 'terminal' → create cliFramework category
+  suggestedTools: ['commander', 'yargs', 'oclif']
+  
+- Description mentions 'parse HTML' or 'web scraping' → create htmlParser category
+  suggestedTools: ['cheerio', 'jsdom', 'node-html-parser']
+  
+- Description mentions 'computer vision' or 'image recognition' → create imageProcessor
+  suggestedTools: ['sharp', 'jimp', 'opencv4nodejs']
+  
+- Description mentions 'natural language' or 'NLP' offline → create nlpEngine category
+  suggestedTools: ['natural', 'compromise', 'wink-nlp']
+
 Analyze this project and return the required technology categories:
 
 Project Name: ${draft.projectName}
@@ -148,6 +190,40 @@ Do NOT suggest any tool in the forbidden list.
 Do NOT suggest any category in the forbidden list.
 You MUST include categories for each required tool type listed above.
 
+After listing the standard required categories, scan the description again specifically for specialized technical requirements that need a custom category.
+
+For each one found, add it to requiredCategories with this additional field:
+{
+  "key": "astParser",
+  "label": "AST Parser",
+  "reason": "Project requires parsing source code into an Abstract Syntax Tree for analysis",
+  "isCustom": true,
+  "suggestedTools": [
+    {
+      "name": "tree-sitter",
+      "reason": "Supports 40+ languages, offline, fast, used in VS Code and Neovim",
+      "installCommand": "npm install tree-sitter",
+      "docsUrl": "https://tree-sitter.github.io"
+    },
+    {
+      "name": "@babel/parser",
+      "reason": "Best for JavaScript/TypeScript, fully offline, widely used",
+      "installCommand": "npm install @babel/parser",
+      "docsUrl": "https://babeljs.io/docs/babel-parser"
+    },
+    {
+      "name": "acorn",
+      "reason": "Lightweight JS parser, offline, minimal dependencies",
+      "installCommand": "npm install acorn",
+      "docsUrl": "https://github.com/acornjs/acorn"
+    }
+  ]
+}
+
+Also re-check the constraints:
+- If mustBeOffline is true, every suggestedTool must work without internet
+- If mustUseLocalStorage is true, do not suggest any cloud database in any category
+
 Analyze this project and return the required technology categories.
 Your ENTIRE response must be a single JSON object matching this structure exactly:
 
@@ -159,7 +235,16 @@ Your ENTIRE response must be a single JSON object matching this structure exactl
       "key": "camelCase category key",
       "label": "Human readable label",
       "reason": "why this project needs this category",
-      "relevantToProjectType": true
+      "relevantToProjectType": true,
+      "isCustom": true,
+      "suggestedTools": [
+        {
+          "name": "tool-name",
+          "reason": "why",
+          "installCommand": "npm install tool-name",
+          "docsUrl": "https://..."
+        }
+      ]
     }
   ],
   "excludedCategories": [
@@ -178,6 +263,7 @@ Return valid JSON only.`,
         
         return {
           requiredCategories: result.requiredCategories.map((c) => c.key),
+          fullCategories: result.requiredCategories,
           engine: "claude",
           projectType: result.projectType,
           classificationReason: result.classificationReason,

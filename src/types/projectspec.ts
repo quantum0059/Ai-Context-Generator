@@ -84,3 +84,17 @@ export interface ConflictReport {
   conflicts: ConflictItem[];
   warnings: ConflictItem[];
 }
+
+export interface DiscoveredCategory {
+  key: string;
+  label: string;
+  reason: string;
+  relevantToProjectType: boolean;
+  isCustom?: boolean;
+  suggestedTools?: {
+    name: string;
+    reason: string;
+    installCommand: string;
+    docsUrl: string;
+  }[];
+}

@@ -182,7 +182,26 @@ export default function StackPage() {
     updateStackValue(id, suggestion.name, "suggested");
   }
 
-  const activeCategory = CATEGORIES.find((c) => c.id === suggestCategory);
+  const customCategories = (state.fullCategories || []).filter(c => c.isCustom);
+
+  let activeCategoryTitle = "";
+  let activeSuggestions: SuggestionOption[] = [];
+  
+  const standardCat = CATEGORIES.find((c) => c.id === suggestCategory);
+  if (standardCat) {
+    activeCategoryTitle = standardCat.title;
+    activeSuggestions = MOCK_SUGGESTIONS[standardCat.title] ?? [];
+  } else if (suggestCategory) {
+    const customCat = customCategories.find((c) => c.key === suggestCategory);
+    if (customCat) {
+      activeCategoryTitle = customCat.label;
+      activeSuggestions = (customCat.suggestedTools || []).map(t => ({
+        name: t.name,
+        rationale: t.reason,
+        installCommand: t.installCommand,
+      }));
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-16 text-white">
@@ -217,6 +236,29 @@ export default function StackPage() {
               onNotNeeded={() => markStackSkipped(category.id)}
             />
           ))}
+
+          {customCategories.map((customCat) => {
+            const options = (customCat.suggestedTools || []).map((t) => t.name);
+            if (options.length === 0) options.push("Custom"); // fallback
+            
+            return (
+              <StackCategoryRow
+                key={customCat.key}
+                title={customCat.label}
+                description={customCat.reason}
+                icon={Box}
+                options={options}
+                value={state.stack[customCat.key]?.value ?? options[0]}
+                onValueChange={(value) => updateStackValue(customCat.key, value, "user")}
+                confirmed={false}
+                skipped={state.stack[customCat.key]?.skipped ?? false}
+                showActions={true}
+                onSuggest={() => setSuggestCategory(customCat.key)}
+                onNotNeeded={() => markStackSkipped(customCat.key)}
+                isCustom={true}
+              />
+            );
+          })}
         </div>
       </main>
 
@@ -225,16 +267,16 @@ export default function StackPage() {
         continueHref="/new-project/continuous"
       />
 
-      {activeCategory && (
+      {suggestCategory && (
         <SuggestDialog
           open={suggestCategory !== null}
           onOpenChange={(open) => {
             if (!open) setSuggestCategory(null);
           }}
-          categoryTitle={activeCategory.title}
-          suggestions={MOCK_SUGGESTIONS[activeCategory.title] ?? []}
+          categoryTitle={activeCategoryTitle}
+          suggestions={activeSuggestions}
           onSelect={(suggestion) =>
-            applySuggestion(activeCategory.id, suggestion)
+            applySuggestion(suggestCategory, suggestion)
           }
         />
       )}

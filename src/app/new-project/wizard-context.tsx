@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import type { DiscoveredCategory } from "@/types/projectspec";
 
 export interface WizardState {
   projectName: string;
@@ -12,6 +13,7 @@ export interface WizardState {
   designReferences: string;
   projectType?: string;
   classificationReason?: string;
+  fullCategories?: DiscoveredCategory[];
 }
 
 const DEFAULT_STATE: WizardState = {
@@ -31,6 +33,7 @@ const DEFAULT_STATE: WizardState = {
   designReferences: "",
   projectType: "",
   classificationReason: "",
+  fullCategories: [],
 };
 
 interface WizardContextProps {
@@ -74,6 +77,7 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
           designReferences: (spec.designReferences || []).join(", "),
           projectType: spec.projectType || "",
           classificationReason: spec.classificationReason || "",
+          fullCategories: [],
         };
         setState(templateState);
         sessionStorage.removeItem("contextforge_template_spec");

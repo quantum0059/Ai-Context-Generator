@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 export interface SuggestionOption {
   name: string;
   rationale: string;
+  installCommand?: string;
 }
 
 interface SuggestDialogProps {
@@ -65,6 +66,11 @@ export function SuggestDialog({
               <p className="mt-1 text-xs leading-relaxed text-[#888]">
                 {suggestion.rationale}
               </p>
+              {suggestion.installCommand && (
+                <div className="mt-2 rounded bg-black/40 px-2 py-1.5 font-mono text-[10px] text-[#A1A1AA]">
+                  {suggestion.installCommand}
+                </div>
+              )}
             </button>
           ))}
         </div>
