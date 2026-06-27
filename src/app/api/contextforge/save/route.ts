@@ -35,7 +35,8 @@ export async function POST(req: Request) {
 
   const parsed = requestSchema.safeParse(await req.json());
   if (!parsed.success) {
-    return Response.json({ error: parsed.error.flatten() }, { status: 400 });
+    const errorMsg = parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join(", ");
+    return Response.json({ error: `Validation failed: ${errorMsg}` }, { status: 400 });
   }
 
   const { spec, meta } = parsed.data;

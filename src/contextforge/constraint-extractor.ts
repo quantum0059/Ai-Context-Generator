@@ -90,7 +90,7 @@ Return exactly this structure:
 
 If no hard constraints exist, return the structure with empty arrays and false booleans.`;
 
-      const result = await claudeJson(`${systemPrompt}\n\n${userPrompt}`, constraintsSchema, 1, MODELS.FAST);
+      const result = await claudeJson(systemPrompt, userPrompt, constraintsSchema, 1, MODELS.FAST);
       return result;
     } catch (err) {
       console.error("[ConstraintExtractor Error]", err);

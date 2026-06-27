@@ -61,7 +61,7 @@ function isPresentationLayerFalsePositive(item: ConflictItem, spec: ProjectSpec)
 
 function isEvidenceBackedBlocker(item: ConflictItem, spec: ProjectSpec): boolean {
   const text = `${item.type} ${item.description}`.toLowerCase();
-  const offline = /\b(offline|no internet|without internet|runs locally)\b/i.test(spec.description)
+  const offline = /\b(fully offline|offline only|no internet allowed)\b/i.test(spec.description)
     || spec.constraints.technical?.mustBeOffline;
   const category = categoryForTool(spec, item.offendingTool);
   const tool = item.offendingTool.toLowerCase();

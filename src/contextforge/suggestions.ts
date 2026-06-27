@@ -94,6 +94,7 @@ export async function suggestForCategory(
     if (isClaudeConfigured()) {
       try {
         const r = await claudeJson(
+          "You are a technical advisor selecting the best tools for a software project. Rank only from the provided candidates. Return JSON only.",
           `Rank the best 2-3 tools for the "${category}" category of this project and explain why per option.\n` +
             `Project: ${draft.description}\nPlatform: ${draft.platform}\nFeatures: ${draft.features.join(", ")}\n` +
             `Budget: ${draft.constraints.budget ?? "unspecified"}\nAvoid: ${(draft.constraints.avoid ?? []).join(", ") || "nothing"}\n` +
@@ -151,6 +152,7 @@ export async function suggestForCategory(
         `Return JSON: {"candidates":[{"name":"...","rationale":"...","docsUrl":"...","confidence":"high|low"}]}`;
 
       const r = await claudeJson(
+        "You are a technical advisor recommending software tools. Only suggest real, currently-maintained tools. Return JSON only.",
         prompt,
         tier2Schema,
         1,

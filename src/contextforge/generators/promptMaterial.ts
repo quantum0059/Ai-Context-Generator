@@ -27,6 +27,7 @@ async function identifyScreens(spec: ProjectSpec): Promise<ScreenInfo[]> {
   if (isClaudeConfigured()) {
     try {
       const r = await claudeJson(
+        `You are a UI/UX expert identifying the key screens for a ${spec.platform} application. Return JSON only, no prose.`,
         `Identify the key UI screens for this ${spec.platform} project.\n` +
           `Project: "${spec.projectName}" — ${spec.description}\nFeatures: ${spec.features.join(", ")}\n` +
           `For each screen, provide:\n` +

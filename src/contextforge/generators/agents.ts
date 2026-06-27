@@ -2,14 +2,16 @@ import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 import type { ProjectSpec } from "../../types/projectspec";
-import { decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
+import { buildConstraintBlock, decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
 
 /** agents.md - the AI constitution (Section 7), generated solely from the finalized ProjectSpec. */
 export async function generateAgents(spec: ProjectSpec): Promise<string> {
   const locked = lockedEntries(spec);
   const stackSummary = locked.map(([category, entry]) => `- ${category}: ${entry.value}`).join("\n");
 
-  const systemPrompt = `You are an expert software architect writing an AI development constitution for a specific project. This document will be fed to AI coding assistants (Claude, Cursor, ChatGPT, Copilot) as their primary instruction file. It must be so specific that an AI reading it produces architecturally correct code on the first attempt without any additional explanation from the developer.
+  const constraintBlock = buildConstraintBlock(spec);
+
+  const systemPrompt = `${constraintBlock}You are an expert software architect writing an AI development constitution for a specific project. This document will be fed to AI coding assistants (Claude, Cursor, ChatGPT, Copilot) as their primary instruction file. It must be so specific that an AI reading it produces architecturally correct code on the first attempt without any additional explanation from the developer.
 
 Rules for what you write:
 - Every rule must reference the exact technology chosen for this project by name
@@ -83,7 +85,8 @@ List any stack choices marked confidence: 'low' and tell the AI to verify their 
       });
 
       const result = await claudeJson(
-        systemPrompt + "\n\n" + userPrompt,
+        systemPrompt,
+        userPrompt,
         responseSchema,
         1,
         MODELS.CONTENT,
@@ -117,7 +120,10 @@ function fallbackAgents(spec: ProjectSpec): string {
         .join("\n")
     : "_None. All locked stack entries are high confidence._";
 
+  const constraintBlock = buildConstraintBlock(spec);
+
   return `# ${spec.projectName} - AI Development Constitution
+${constraintBlock}
 
 ## Project Overview
 ${spec.description}

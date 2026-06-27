@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { claudeJson, claudeText, isClaudeConfigured } from "../../lib/claude";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
-import { slugify } from "./shared";
+import { buildConstraintBlock, slugify } from "./shared";
 import { MODELS } from "../../lib/ai-models";
 
 const aspectSchema = z.object({
@@ -12,10 +12,10 @@ const aspectSchema = z.object({
 
 type Aspect = z.infer<typeof aspectSchema>;
 
-async function getFeatureAspects(spec: ProjectSpec, feature: string): Promise<Aspect[]> {
+async function getFeatureAspects(spec: ProjectSpec, feature: string, sharedContext: string = ''): Promise<Aspect[]> {
   if (isClaudeConfigured()) {
     try {
-      const systemPrompt = `You are a senior engineer. Given a feature and a technology stack, determine the implementation aspects that need separate build prompts. An aspect is a distinct implementation concern that an AI works on independently.
+      const systemPrompt = `${buildConstraintBlock(spec)}You are a senior engineer. Given a feature and a technology stack, determine the implementation aspects that need separate build prompts. An aspect is a distinct implementation concern that an AI works on independently.
 
 Return a JSON object only, no other text:
 {
@@ -33,7 +33,8 @@ Common aspects to consider (only include what applies):
 - state-management (if there is a state library)
 - authentication-integration (if auth is involved)
 - error-handling
-- testing`;
+- testing
+${sharedContext}`;
 
       const userPrompt = `Feature: ${feature}
 Stack: ${JSON.stringify(spec.stack)}
@@ -41,19 +42,19 @@ Platform: ${spec.platform}
 
 What aspects does this feature need? Return only aspects that are relevant to this specific stack.`;
 
-      const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
       const result = await claudeJson(
-        fullPrompt,
+        systemPrompt,
+        userPrompt,
         z.object({ aspects: z.array(aspectSchema) }),
         1,
         MODELS.CONTENT,
       );
-      return ensureRequiredAspects(feature, result.aspects);
+      return filterAspectsAgainstConstraints(ensureRequiredAspects(feature, result.aspects), spec);
     } catch {
       // fall through to heuristics
     }
   }
-  return ensureRequiredAspects(feature, heuristicFeatureAspects(spec, feature));
+  return filterAspectsAgainstConstraints(ensureRequiredAspects(feature, heuristicFeatureAspects(spec, feature)), spec);
 }
 
 function ensureRequiredAspects(feature: string, aspects: Aspect[]): Aspect[] {
@@ -67,6 +68,42 @@ function ensureRequiredAspects(feature: string, aspects: Aspect[]): Aspect[] {
       description: "Detect programming concepts from normalized AST nodes and query matches",
     },
   ];
+}
+
+/**
+ * Post-processes the aspect list returned by the AI to remove any aspects that
+ * are architecturally invalid given the project constraints. This is the key
+ * gate that prevents api-routes and authentication-integration prompts from
+ * ever being generated for offline, no-backend projects.
+ */
+function filterAspectsAgainstConstraints(aspects: Aspect[], spec: ProjectSpec): Aspect[] {
+  const isOffline = spec.constraints?.technical?.mustBeOffline;
+
+  const hasHttpServer = Object.values(spec.stack ?? {}).some((v) =>
+    ['express', 'fastify', 'hono', 'nestjs'].some((f) =>
+      v?.value?.toLowerCase().includes(f)
+    )
+  );
+
+  return aspects.filter((aspect) => {
+    // Remove auth aspects for offline single-user apps
+    if (isOffline && aspect.aspect.includes('authentication')) {
+      console.log(
+        `[AspectFilter] Removed ${aspect.aspect} — auth not valid for offline app`
+      );
+      return false;
+    }
+
+    // Remove API route aspects when no HTTP server is in the stack
+    if (aspect.aspect === 'api-routes' && !hasHttpServer) {
+      console.log(
+        `[AspectFilter] Removed api-routes — no HTTP server in stack`
+      );
+      return false;
+    }
+
+    return true;
+  });
 }
 
 export function isPromptContentValid(content: string, featureName: string, aspect: string): boolean {
@@ -96,9 +133,10 @@ function heuristicFeatureAspects(spec: ProjectSpec, feature: string): Aspect[] {
   ];
 }
 
-async function generateAspectPrompt(spec: ProjectSpec, feature: string, aspect: Aspect): Promise<string> {
+async function generateAspectPrompt(spec: ProjectSpec, feature: string, aspect: Aspect, sharedContext: string = ''): Promise<string> {
   if (isClaudeConfigured()) {
-    const systemPrompt = `You are a senior engineer writing implementation instructions for an AI coding assistant. The AI will read ONLY this file before implementing this aspect. Be so specific that the AI produces correct code on the first attempt.
+    const constraintBlock = buildConstraintBlock(spec);
+    const systemPrompt = `${constraintBlock}You are a senior engineer writing implementation instructions for an AI coding assistant. The AI will read ONLY this file before implementing this aspect. Be so specific that the AI produces correct code on the first attempt.
 
 Rules:
 - Include exact file paths to create or modify
@@ -108,7 +146,8 @@ Rules:
 - Include explicit acceptance criteria as a checklist
 - Include the exact test cases that prove it works
 - Include what NOT to do for this specific stack
-- Never say 'implement X' without showing what X looks like for this project's stack`;
+- Never say 'implement X' without showing what X looks like for this project's stack
+${sharedContext}`;
 
     const stackString = Object.entries(spec.stack)
       .map(([cat, tool]) => `${cat}: ${tool?.value}`)
@@ -155,17 +194,16 @@ Include at least 3 specific, testable checkbox items using - [ ].
 ## Test Cases
 Include real test code without placeholder assertions.`;
 
-    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
     try {
-      const content = await claudeText(fullPrompt, 1, MODELS.CONTENT);
+      const content = await claudeText(systemPrompt, userPrompt, 1, MODELS.CONTENT);
       if (isPromptContentValid(content, feature, aspect.aspect)) return content;
     } catch {
       // Retry below with the fallback content model.
     }
 
     try {
-      const retryPrompt = `${fullPrompt}\n\nYou MUST include: (1) real file paths starting with src/, (2) TypeScript interfaces, (3) at least 3 acceptance criteria checkboxes. Do not write placeholder code.`;
-      const content = await claudeText(retryPrompt, 0, MODELS.CONTENT_FALLBACK);
+      const retrySystemPrompt = `${systemPrompt}\n\nYou MUST include: (1) real file paths starting with src/, (2) TypeScript interfaces, (3) at least 3 acceptance criteria checkboxes. Do not write placeholder code.`;
+      const content = await claudeText(retrySystemPrompt, userPrompt, 0, MODELS.CONTENT_FALLBACK);
       if (isPromptContentValid(content, feature, aspect.aspect)) return content;
     } catch {
       // Return an explicit failure notice below.
@@ -186,7 +224,7 @@ Please manually write implementation instructions for this aspect.
 }
 
 /** Dynamic prompt generation per feature with rich, self-contained context (Section 8). */
-export async function generatePrompts(spec: ProjectSpec): Promise<PackageFiles> {
+export async function generatePrompts(spec: ProjectSpec, sharedContext: string = ''): Promise<PackageFiles> {
   const files: PackageFiles = {};
 
   for (let featureIndex = 0; featureIndex < spec.features.length; featureIndex++) {
@@ -195,10 +233,10 @@ export async function generatePrompts(spec: ProjectSpec): Promise<PackageFiles> 
       `[Generator] Generating ${feature} prompts (${featureIndex + 1}/${spec.features.length})...`,
     );
     const featureSlug = slugify(feature);
-    const aspects = await getFeatureAspects(spec, feature);
+    const aspects = await getFeatureAspects(spec, feature, sharedContext);
 
     const aspectPromises = aspects.map(async (aspect) => {
-      const generatedContent = await generateAspectPrompt(spec, feature, aspect);
+      const generatedContent = await generateAspectPrompt(spec, feature, aspect, sharedContext);
       files[`prompts/${featureSlug}/${aspect.aspect}.md`] = generatedContent;
     });
 

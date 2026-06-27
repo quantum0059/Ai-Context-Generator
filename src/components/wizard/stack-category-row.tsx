@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Check } from "lucide-react";
 
@@ -43,6 +44,16 @@ export function StackCategoryRow({
   onNotNeeded,
   isCustom = false,
 }: StackCategoryRowProps) {
+  const [isCustomMode, setIsCustomMode] = useState(false);
+  const [customValue, setCustomValue] = useState("");
+
+  const handleCustomSave = () => {
+    if (customValue.trim()) {
+      onValueChange(customValue.trim());
+    }
+    setIsCustomMode(false);
+  };
+
   return (
     <div
       className={cn(
@@ -80,11 +91,46 @@ export function StackCategoryRow({
           >
             Skipped
           </Badge>
+        ) : isCustomMode ? (
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCustomSave();
+                if (e.key === "Escape") setIsCustomMode(false);
+              }}
+              placeholder="e.g. My Custom Tool"
+              className="h-9 w-[180px] rounded-md border border-white/[0.10] bg-[#1A1A1A] px-3 text-sm text-white placeholder:text-[#888] focus:outline-none focus:ring-1 focus:ring-white/[0.20]"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCustomSave}
+              className="h-9 rounded-lg border-white/[0.12] bg-[#222] px-3 text-[13px] text-white hover:bg-[#333]"
+            >
+              Save
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsCustomMode(false)}
+              className="h-9 px-2 text-[13px] text-[#888] hover:text-white"
+            >
+              Cancel
+            </Button>
+          </div>
         ) : (
           <Select
             value={value}
             onValueChange={(next) => {
-              if (next) onValueChange(next);
+              if (next === "__CUSTOM__") {
+                setCustomValue("");
+                setIsCustomMode(true);
+              } else {
+                if (next) onValueChange(next);
+              }
             }}
           >
             <SelectTrigger className="h-9 w-[200px] border-white/[0.10] bg-[#1A1A1A] text-sm text-white hover:bg-[#1A1A1A]">
@@ -100,11 +146,14 @@ export function StackCategoryRow({
                   {option}
                 </SelectItem>
               ))}
+              <SelectItem value="__CUSTOM__" className="text-blue-400 focus:bg-blue-500/10 focus:text-blue-400 border-t border-white/[0.06] mt-1 pt-2 font-medium">
+                + Enter custom...
+              </SelectItem>
             </SelectContent>
           </Select>
         )}
 
-        {showActions && !skipped && (
+        {showActions && !skipped && !isCustomMode && (
           <>
             <Button
               type="button"

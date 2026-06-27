@@ -19,7 +19,11 @@ export type Category =
   | "analytics"
   | "monitoring"
   | "hosting"
-  | "styling";
+  | "styling"
+  | "dataFetching"
+  | "speechRecognition"
+  | "textToSpeech"
+  | "notifications";
 
 export type Budget = "free-only" | "low" | "flexible";
 

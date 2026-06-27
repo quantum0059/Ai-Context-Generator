@@ -52,7 +52,9 @@ interface TechStackEntry {
  *
  * Replaces the old skills/ folder which produced 5 cryptic files per technology.
  */
-export function generateSkills(spec: ProjectSpec): PackageFiles {
+// sharedContext is accepted for API consistency but unused — generateSkills is
+// a pure, synchronous function with no AI calls.
+export function generateSkills(spec: ProjectSpec, _sharedContext: string = ''): PackageFiles {
   const entries: TechStackEntry[] = [];
   const markdownSections: string[] = [];
 

@@ -83,14 +83,13 @@ export async function POST(req: Request) {
 
   try {
     const result = await claudeJson(
-      `You are analyzing a software project to suggest the most relevant features it should have.\n\n` +
-        `Project name: ${projectName}\n` +
+      `You are a product manager and software architect identifying the most relevant features for a specific software project. Tailor all suggestions to the project's actual purpose. If the project is a HEADLESS_ENGINE or BACKEND_API, do not suggest UI features like 'User Dashboard'. Return JSON only.`,
+      `Project name: ${projectName}\n` +
         `Description: ${description}\n` +
         `Platform: ${platform}\n` +
         (projectType ? `Project Classification: ${projectType}\n\n` : `\n`) +
         `Based on this specific project, suggest 6-10 features that would be most relevant and valuable. ` +
-        `Think about what this particular type of application needs - do NOT suggest generic features that would apply to any app. ` +
-        `Tailor each feature to the project's actual purpose. If this is a HEADLESS_ENGINE or BACKEND_API, do not suggest UI features like 'User Dashboard'.\n\n` +
+        `Think about what this particular type of application needs - do NOT suggest generic features that would apply to any app.\n\n` +
         `Return JSON: {"features":[{"name":"Feature Name","description":"Brief description of why this feature matters for THIS project"}]}`,
       featuresSchema,
       1,

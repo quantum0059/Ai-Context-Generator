@@ -63,10 +63,7 @@ ${stackString}
 
 IMPORTANT CATEGORY SEMANTICS:
 - Every line is "category: selected tool". A non-empty custom category means that concern IS resolved.
-- Tools in dashboardUi are an optional local presentation layer. They are not the runtime that performs AST parsing or code execution.
 - A project may expose both a CLI (cliToolkit) and a local dashboard (dashboardUi); this is not a conflict.
-- Custom AST rules engine is a valid implementation choice for complexityAnalysis.
-- Custom pattern matcher is a valid implementation choice for algorithmRecognition.
 
 Check for these conflict types and any others you identify:
 
@@ -118,7 +115,7 @@ If no conflicts exist return:
   "warnings": []
 }`;
 
-    const report = await claudeJson(`${systemPrompt}\n\n${userPrompt}`, conflictReportSchema, 1, MODELS.FAST);
+    const report = await claudeJson(systemPrompt, userPrompt, conflictReportSchema, 1, MODELS.FAST);
     return Response.json(sanitizeConflictReport(report, spec));
   } catch (err) {
     console.error("[CheckConflicts Error]", err);

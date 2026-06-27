@@ -22,7 +22,8 @@ function extractJson(text: string): string {
 }
 
 export async function xaiJson<T>(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   schema: z.ZodType<T>,
   retries = 2,
 ): Promise<T> {
@@ -42,9 +43,10 @@ export async function xaiJson<T>(
         body: JSON.stringify({
           model,
           messages: [
+            { role: "system", content: systemPrompt },
             {
               role: "user",
-              content: `${prompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.`,
+              content: `${userPrompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.`,
             },
           ],
           response_format: { type: "json_object" },
@@ -67,7 +69,8 @@ export async function xaiJson<T>(
 }
 
 export async function xaiText(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   retries = 2,
 ): Promise<string> {
   const apiKey = process.env.XAI_API_KEY;
@@ -86,10 +89,8 @@ export async function xaiText(
         body: JSON.stringify({
           model,
           messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
           ],
           temperature: 0,
         }),

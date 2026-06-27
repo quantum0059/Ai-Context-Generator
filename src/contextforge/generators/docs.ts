@@ -1,6 +1,6 @@
 import { registryByName } from "../registry";
 import type { PackageFiles, PackageMeta, ProjectSpec } from "../../types/projectspec";
-import { lockedEntries, slugify } from "./shared";
+import { buildConstraintBlock, lockedEntries, slugify, detectPrimaryEcosystem, isNonJsEcosystem } from "./shared";
 import { claudeText, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 
@@ -112,7 +112,7 @@ export function generatePackageReadme(spec: ProjectSpec): string {
     ? spec.features.map((f) => `- ${f}`).join("\n")
     : "- _See project description_";
 
-  return `# ${spec.projectName} — AI Context Package
+  let readmeContent = `# ${spec.projectName} — AI Context Package
 
 > This package is your AI assistant's memory for building **${spec.projectName}**.
 > It ensures every AI tool you use (Claude, ChatGPT, Cursor, Copilot, Gemini)
@@ -182,6 +182,44 @@ ${stackTable || "| _No stack entries_ | | |"}
 - **Don't skip the tests** — every prompt includes testing requirements. Catch bugs early.
 - **Check \`decisions/\` before changing anything** — if you're tempted to swap a technology, read the ADR first to understand why it was chosen.
 `;
+
+  const ecosystem = detectPrimaryEcosystem(spec)
+
+  if (isNonJsEcosystem(ecosystem)) {
+    const ecosystemName = ecosystem.charAt(0)
+      .toUpperCase() + ecosystem.slice(1)
+      
+    const warning = `
+> ## ⚠️ Non-JavaScript Ecosystem Detected: ${ecosystemName}
+>
+> ContextForge has the most complete registry 
+> coverage for **JavaScript and TypeScript** projects.
+>
+> For **${ecosystemName}** projects:
+> - Verify all package names against official 
+>   ${ecosystemName} package registries before 
+>   installing
+> - Generated \`install.sh\` commands may use 
+>   \`npm install\` — replace with the correct 
+>   package manager (\`cargo add\`, \`go get\`, 
+>   \`pip install\`, \`maven\`, etc.)
+> - Code examples in prompts use TypeScript syntax 
+>   — translate patterns to ${ecosystemName} idioms
+> - ADR technology choices are best-effort for 
+>   this ecosystem — consult official docs to verify
+>
+> The generated \`agents.md\`, \`dependency-graph.json\`, 
+> and \`context-manifests/\` remain fully useful 
+> as architectural guides regardless of ecosystem.
+`
+    // Prepend warning after the first heading
+    readmeContent = readmeContent.replace(
+      /^(# .+\n)/,
+      `$1\n${warning}\n`
+    )
+  }
+
+  return readmeContent;
 }
 
 export function generateTemplates(spec: ProjectSpec): PackageFiles {
@@ -655,8 +693,9 @@ describe("createTodo", () => {
   };
 }
 
-export async function generateSetup(spec: ProjectSpec): Promise<PackageFiles> {
-  const systemPrompt = `You are a senior DevOps engineer generating project bootstrapping files. Every file must work correctly when executed against this exact stack — no placeholders, no 'TODO: replace this', no generic commands that might not apply.`;
+export async function generateSetup(spec: ProjectSpec, sharedContext: string = ''): Promise<PackageFiles> {
+  const systemPrompt = `${buildConstraintBlock(spec)}You are a senior DevOps engineer generating project bootstrapping files. Every file must work correctly when executed against this exact stack — no placeholders, no 'TODO: replace this', no generic commands that might not apply.
+${sharedContext}`;
 
   const userPrompt = `Generate complete setup files for:
 
@@ -731,7 +770,7 @@ A human-readable guide:
 
   if (isClaudeConfigured()) {
     try {
-      const response = await claudeText(systemPrompt + "\n\n" + userPrompt, 1, MODELS.CONTENT);
+      const response = await claudeText(systemPrompt, userPrompt, 1, MODELS.CONTENT);
       const files: PackageFiles = {};
       const parts = response.split(/---\nFILE:\s*(.+?)\n---/g);
       for (let i = 1; i < parts.length; i += 2) {
@@ -766,7 +805,12 @@ npm install tree-sitter-python`;
 
   if (isClaudeConfigured()) {
     try {
-      const response = await claudeText(prompt, 1, MODELS.FAST);
+      const response = await claudeText(
+        "You are a DevOps engineer. Return ONLY the shell commands to install a package with no explanation, no markdown, just commands. One command per line.",
+        prompt,
+        1,
+        MODELS.FAST,
+      );
       const commands = response
         .replace(/```(?:bash|sh|shell)?/gi, "")
         .replace(/```/g, "")

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { claudeJson, claudeText, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 import type { ProjectSpec } from "../../types/projectspec";
+import { buildConstraintBlock } from "./shared";
 
 const orderSchema = z.object({
   ordered: z.array(z.object({ feature: z.string(), reason: z.string() })).min(1),
@@ -39,9 +40,15 @@ export async function orderFeatures(
   if (spec.features.length === 0) return [];
   if (isClaudeConfigured()) {
     try {
+      const systemPrompt = `${buildConstraintBlock(spec)}You are a technical project manager. Order the given features by logical build dependency.
+
+Return JSON only: {"ordered":[{"feature":"<exact feature text>","reason":"..."}]} containing every feature exactly once.`;
+      const userPrompt = `Order these features of project "${spec.projectName}" (${spec.platform}) by logical build dependency — what must exist before what.
+
+Features: ${spec.features.join("; ")}`;
       const r = await claudeJson(
-        `Order these features of project \"${spec.projectName}\" (${spec.platform}) by logical build dependency - what must exist before what. Features: ${spec.features.join("; ")}.\n` +
-          `Return JSON: {"ordered":[{"feature":"<exact feature text>","reason":"..."}]} containing every feature exactly once.`,
+        systemPrompt,
+        userPrompt,
         orderSchema,
         1,
         MODELS.REASONING,
@@ -83,7 +90,7 @@ export async function generateDependencyGraphJson(
   spec: ProjectSpec,
 ): Promise<string> {
   const systemPrompt =
-    "You are a technical project manager determining the optimal build order for a software project. Return valid JSON only, no markdown, no code fences.";
+    `${buildConstraintBlock(spec)}You are a technical project manager determining the optimal build order for a software project. Return valid JSON only, no markdown, no code fences.`;
 
   const userPrompt = `Determine the build order and dependencies for:
 
@@ -137,7 +144,7 @@ Rules for determining order:
   if (isClaudeConfigured() && spec.features.length > 0) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const response = await claudeText(systemPrompt + "\n\n" + userPrompt, 1, MODELS.REASONING);
+        const response = await claudeText(systemPrompt, userPrompt, 1, MODELS.REASONING);
         // Attempt to clean markdown JSON formatting if present
         const cleaned = response
           .replace(/^```json\s*/m, "")

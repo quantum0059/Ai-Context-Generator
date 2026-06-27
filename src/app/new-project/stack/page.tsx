@@ -41,6 +41,13 @@ const CATEGORY_META: Record<string, { title: string; description: string; icon: 
   storage: { title: "File Storage", description: "File and object storage", icon: Database },
   email: { title: "Email", description: "Transactional or marketing email", icon: Mail },
   searchProvider: { title: "Search", description: "Application search infrastructure", icon: Search },
+  dataFetching: { title: "Data Fetching", description: "Data fetching and caching", icon: Cloud },
+  speechRecognition: { title: "Speech Recognition", description: "Speech to text transcription", icon: Cpu },
+  textToSpeech: { title: "Text to Speech", description: "Text to speech generation", icon: Cpu },
+  notifications: { title: "Notifications", description: "Push and local notifications", icon: Mail },
+  analytics: { title: "Analytics", description: "Product and web analytics", icon: LayoutGrid },
+  monitoring: { title: "Monitoring", description: "Error tracking and performance", icon: LayoutGrid },
+  video: { title: "Video", description: "Video calling and streaming", icon: LayoutGrid },
 };
 
 function humanizeCategory(key: string): string {
@@ -109,8 +116,16 @@ export default function StackPage() {
         const relevant = discovered.filter((category) => category.relevantToProjectType !== false);
         if (!relevant.length) throw new Error("No relevant technology categories were discovered");
         if (cancelled) return;
-        setCategories(relevant);
-        const allowed = new Set(relevant.map((category) => category.key));
+        
+        const discoveredKeys = new Set(relevant.map(c => c.key));
+        const missingCategories = Object.keys(CATEGORY_META)
+          .filter(key => !discoveredKeys.has(key))
+          .map(categoryFromKey);
+          
+        const allCategories = [...relevant, ...missingCategories];
+        
+        setCategories(allCategories);
+        const allowed = new Set(allCategories.map((category) => category.key));
         const relevantStack = Object.fromEntries(
           Object.entries(state.stack).filter(([key]) => allowed.has(key)),
         );

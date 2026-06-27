@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { claudeJson } from "../../lib/claude";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
-import { decisionFileName, relevantCategoriesForFeature, slugify } from "./shared";
+import { buildConstraintBlock, decisionFileName, relevantCategoriesForFeature, slugify } from "./shared";
 import { MODELS } from "../../lib/ai-models";
 
 function matchingUiReferences(featureSlug: string, materialFiles: PackageFiles): string[] {
@@ -53,7 +53,7 @@ async function generateFeatureManifest(
   featureIdx: number,
   uniqueContext: string[],
 ): Promise<Manifest | null> {
-  const systemPrompt = `You are a technical project manager generating a machine-readable task definition for an AI coding agent. The agent will read this JSON file and know exactly what to build, what files to create, what to test, and what done looks like — with zero human input required.
+  const systemPrompt = `${buildConstraintBlock(spec)}You are a technical project manager generating a machine-readable task definition for an AI coding agent. The agent will read this JSON file and know exactly what to build, what files to create, what to test, and what done looks like — with zero human input required.
 
 Return valid JSON only, no markdown, no code fences.`;
 
@@ -106,7 +106,7 @@ Return this exact JSON structure, fully populated:
 }`;
 
   try {
-    return await claudeJson(`${systemPrompt}\n\n${userPrompt}`, manifestSchema, 1, MODELS.CONTENT);
+    return await claudeJson(systemPrompt, userPrompt, manifestSchema, 1, MODELS.CONTENT);
   } catch (error) {
     // fallback if AI call fails or is not configured
     return null;

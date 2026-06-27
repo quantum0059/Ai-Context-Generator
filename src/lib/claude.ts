@@ -14,6 +14,10 @@ import { MODELS, type AiModel } from "./ai-models";
  * All callers import `isClaudeConfigured` and `claudeJson` from this file.
  * The function names are kept for backward compatibility — they dispatch to
  * whichever provider is configured.
+ *
+ * Every function accepts separate `systemPrompt` and `userPrompt` so that
+ * architectural constraints are given the correct message priority at the
+ * API level, regardless of which provider is in use.
  */
 
 /** Returns true if ANY AI backend (Claude or Groq) is configured. */
@@ -32,7 +36,8 @@ function extractJson(text: string): string {
 }
 
 async function callClaude<T>(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   schema: z.ZodType<T>,
   retries = 2,
 ): Promise<T> {
@@ -53,10 +58,11 @@ async function callClaude<T>(
         body: JSON.stringify({
           model,
           max_tokens: 2048,
+          system: systemPrompt,
           messages: [
             {
               role: "user",
-              content: `${prompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.`,
+              content: `${userPrompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.`,
             },
           ],
         }),
@@ -75,7 +81,8 @@ async function callClaude<T>(
 }
 
 async function callClaudeText(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   retries = 2,
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -95,10 +102,11 @@ async function callClaudeText(
         body: JSON.stringify({
           model,
           max_tokens: 4096,
+          system: systemPrompt,
           messages: [
             {
               role: "user",
-              content: prompt,
+              content: userPrompt,
             },
           ],
         }),
@@ -117,27 +125,28 @@ async function callClaudeText(
 
 /**
  * Sends a prompt to the configured AI provider and validates the response
- * against the given Zod schema. Tries Claude first, then Groq.
+ * against the given Zod schema. Tries Claude first, then xAI, then Groq.
  *
  * All callers import this as `claudeJson` for backward compatibility.
  */
 export async function claudeJson<T>(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   schema: z.ZodType<T>,
   retries = 2,
   model: AiModel = MODELS.CONTENT,
 ): Promise<T> {
   // Prefer Claude when available
   if (process.env.ANTHROPIC_API_KEY) {
-    return callClaude(prompt, schema, retries);
+    return callClaude(systemPrompt, userPrompt, schema, retries);
   }
   // Try xAI
   if (isXaiConfigured()) {
-    return xaiJson(prompt, schema, retries);
+    return xaiJson(systemPrompt, userPrompt, schema, retries);
   }
   // Fallback to Groq
   if (isGroqConfigured()) {
-    return groqJson(prompt, schema, retries, model);
+    return groqJson(systemPrompt, userPrompt, schema, retries, model);
   }
   throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY.");
 }
@@ -146,21 +155,22 @@ export async function claudeJson<T>(
  * Sends a prompt to the configured AI provider and returns the raw text response.
  */
 export async function claudeText(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   retries = 2,
   model: AiModel = MODELS.CONTENT,
 ): Promise<string> {
   // Prefer Claude when available
   if (process.env.ANTHROPIC_API_KEY) {
-    return callClaudeText(prompt, retries);
+    return callClaudeText(systemPrompt, userPrompt, retries);
   }
   // Try xAI
   if (isXaiConfigured()) {
-    return xaiText(prompt, retries);
+    return xaiText(systemPrompt, userPrompt, retries);
   }
   // Fallback to Groq
   if (isGroqConfigured()) {
-    return groqText(prompt, retries, model);
+    return groqText(systemPrompt, userPrompt, retries, model);
   }
   throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY.");
 }

@@ -29,7 +29,8 @@ function requestTimeout(model: AiModel): number {
 }
 
 export async function groqJson<T>(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   schema: z.ZodType<T>,
   retries = 2,
   model: AiModel = MODELS.CONTENT,
@@ -53,9 +54,10 @@ export async function groqJson<T>(
         body: JSON.stringify({
           model: activeModel,
           messages: [
+            { role: "system", content: systemPrompt },
             {
               role: "user",
-              content: `${prompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.`,
+              content: `${userPrompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.`,
             },
           ],
           response_format: { type: "json_object" },
@@ -65,7 +67,7 @@ export async function groqJson<T>(
       if (!res.ok) {
         if (res.status === 429 && activeModel === MODELS.CONTENT) {
           console.warn(`[Generator] ${MODELS.CONTENT} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
-          return groqJson(prompt, schema, 0, MODELS.CONTENT_FALLBACK);
+          return groqJson(systemPrompt, userPrompt, schema, 0, MODELS.CONTENT_FALLBACK);
         }
         throw new Error(`Groq API error: ${res.status}`);
       }
@@ -84,7 +86,8 @@ export async function groqJson<T>(
 }
 
 export async function groqText(
-  prompt: string,
+  systemPrompt: string,
+  userPrompt: string,
   retries = 2,
   model: AiModel = MODELS.CONTENT,
 ): Promise<string> {
@@ -107,10 +110,8 @@ export async function groqText(
         body: JSON.stringify({
           model: activeModel,
           messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
           ],
           temperature: 0,
         }),
@@ -118,7 +119,7 @@ export async function groqText(
       if (!res.ok) {
         if (res.status === 429 && activeModel === MODELS.CONTENT) {
           console.warn(`[Generator] ${MODELS.CONTENT} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
-          return groqText(prompt, 0, MODELS.CONTENT_FALLBACK);
+          return groqText(systemPrompt, userPrompt, 0, MODELS.CONTENT_FALLBACK);
         }
         throw new Error(`Groq API error: ${res.status}`);
       }

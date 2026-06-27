@@ -2,17 +2,18 @@ import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { registryFor, registryByName } from "../registry";
 import type { PackageFiles, ProjectSpec, StackEntry } from "../../types/projectspec";
-import { decisionFileName, lockedEntries } from "./shared";
+import { buildConstraintBlock, decisionFileName, lockedEntries } from "./shared";
 import { MODELS } from "../../lib/ai-models";
 
 /** One ADR per locked category (Section 6). Prevents AI from changing architecture later. */
-export async function generateDecisions(spec: ProjectSpec): Promise<PackageFiles> {
+export async function generateDecisions(spec: ProjectSpec, sharedContext: string = ''): Promise<PackageFiles> {
   const files: PackageFiles = {};
   const entries = lockedEntries(spec);
 
-  const systemPrompt = `You are a senior architect writing an Architecture Decision Record that will be read by AI coding assistants. The ADR must prevent the AI from ever suggesting alternatives to this decision or implementing it incorrectly.
+  const systemPrompt = `${buildConstraintBlock(spec)}You are a senior architect writing an Architecture Decision Record that will be read by AI coding assistants. The ADR must prevent the AI from ever suggesting alternatives to this decision or implementing it incorrectly.
 
-Be extremely specific. Include real code. Every statement must apply to this project specifically, not software development in general.`;
+Be extremely specific. Include real code. Every statement must apply to this project specifically, not software development in general.
+${sharedContext}`;
 
   await Promise.all(
     entries.map(async ([category, entry], index) => {
@@ -74,7 +75,8 @@ Example: 'All database rows owned by a user must have user_id text referencing t
           });
 
           const result = await claudeJson(
-            systemPrompt + "\n\n" + userPrompt,
+            systemPrompt,
+            userPrompt,
             responseSchema,
             1,
             MODELS.REASONING,

@@ -40,15 +40,16 @@ export default function ReviewPage() {
 
   useEffect(() => {
     const savedFilesStr = sessionStorage.getItem("contextforge_generated_files");
-    const savedSpecId = sessionStorage.getItem("contextforge_generated_spec_id");
-    if (savedFilesStr) {
+    const savedSpecStr = sessionStorage.getItem("contextforge_generated_spec");
+    const savedMetaStr = sessionStorage.getItem("contextforge_generated_meta");
+    if (savedFilesStr && savedSpecStr && savedMetaStr) {
       try {
         const files = JSON.parse(savedFilesStr);
-        setGenerated({ count: Object.keys(files).length, meta: { packageVersion: "1.0.0" } as PackageMeta });
+        const spec = JSON.parse(savedSpecStr);
+        const meta = JSON.parse(savedMetaStr);
+        setGenerated({ count: Object.keys(files).length, meta });
         setLastFiles(files);
-        if (savedSpecId) {
-          setLastSpec({ id: savedSpecId } as ProjectSpec);
-        }
+        setLastSpec(spec);
       } catch (e) {
         console.error("Failed to restore generated files from session", e);
       }
@@ -149,9 +150,8 @@ export default function ReviewPage() {
       setLastSpec(spec);
       setLastFiles(data.files);
       sessionStorage.setItem("contextforge_generated_files", JSON.stringify(data.files));
-      if (spec.id) {
-        sessionStorage.setItem("contextforge_generated_spec_id", spec.id);
-      }
+      sessionStorage.setItem("contextforge_generated_spec", JSON.stringify(spec));
+      sessionStorage.setItem("contextforge_generated_meta", JSON.stringify(data.meta));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -168,8 +168,11 @@ export default function ReviewPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ spec: lastSpec, meta: generated.meta }),
       });
-      const data = (await res.json()) as { saved?: boolean; error?: string };
-      setSaveMessage(data.saved ? "Saved to your account." : data.error ?? "Save failed.");
+      const data = (await res.json()) as { saved?: boolean; error?: any };
+      let errMsg = "Save failed.";
+      if (typeof data.error === "string") errMsg = data.error;
+      else if (data.error && typeof data.error === "object") errMsg = JSON.stringify(data.error);
+      setSaveMessage(data.saved ? "Saved to your account." : errMsg);
     } catch (err) {
       setSaveMessage(err instanceof Error ? err.message : "Save failed.");
     }
@@ -394,8 +397,9 @@ export default function ReviewPage() {
       {!generated && (
         <WizardBottomNav
           backHref="/new-project/design"
-          continueHref="/"
-          continueDisabled={!isConfigured || busy}
+          onContinue={() => confirmAndGenerate(false)}
+          continueLabel={busy ? "Generating..." : "Generate Package"}
+          continueDisabled={!isConfigured || busy || blockingConflicts.length > 0}
         />
       )}
     </div>
