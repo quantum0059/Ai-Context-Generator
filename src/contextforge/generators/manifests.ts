@@ -2,6 +2,7 @@ import { z } from "zod";
 import { claudeJson } from "../../lib/claude";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { decisionFileName, relevantCategoriesForFeature, slugify } from "./shared";
+import { MODELS } from "../../lib/ai-models";
 
 function matchingUiReferences(featureSlug: string, materialFiles: PackageFiles): string[] {
   const tokens = featureSlug.split("-").filter((t) => t.length > 2);
@@ -105,7 +106,7 @@ Return this exact JSON structure, fully populated:
 }`;
 
   try {
-    return await claudeJson(`${systemPrompt}\n\n${userPrompt}`, manifestSchema);
+    return await claudeJson(`${systemPrompt}\n\n${userPrompt}`, manifestSchema, 1, MODELS.CONTENT);
   } catch (error) {
     // fallback if AI call fails or is not configured
     return null;
@@ -180,17 +181,17 @@ export async function generateManifests(
 
 ## Before You Start
 
-\${contextList}
+${contextList}
 
 ## Build Prompts
 
 Copy-paste these prompts into your AI assistant to start building:
 
-\${promptList || "- _No prompts generated for this feature_"}
+${promptList || "- _No prompts generated for this feature_"}
 
 ## Build Order
 
-\${dependencyNote}
+${dependencyNote}
 
 ## Relevant Stack
 

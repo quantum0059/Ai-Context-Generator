@@ -19,30 +19,39 @@ function extractJson(text: string): string {
 }
 
 import { z } from "zod";
+import { MODELS, type AiModel } from "./ai-models";
 
-const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 15_000);
+const FAST_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 15_000);
+const CONTENT_REQUEST_TIMEOUT_MS = Number(process.env.AI_CONTENT_REQUEST_TIMEOUT_MS ?? 90_000);
+
+function requestTimeout(model: AiModel): number {
+  return model === MODELS.FAST ? FAST_REQUEST_TIMEOUT_MS : CONTENT_REQUEST_TIMEOUT_MS;
+}
 
 export async function groqJson<T>(
   prompt: string,
   schema: z.ZodType<T>,
   retries = 2,
+  model: AiModel = MODELS.CONTENT,
 ): Promise<T> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
-
   let lastError: unknown;
+  let activeModel: AiModel = model;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      if (activeModel === MODELS.CONTENT || activeModel === MODELS.CONTENT_FALLBACK) {
+        console.log(`[Generator] Using model: ${activeModel}`);
+      }
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(requestTimeout(activeModel)),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model,
+          model: activeModel,
           messages: [
             {
               role: "user",
@@ -53,7 +62,13 @@ export async function groqJson<T>(
           temperature: 0,
         }),
       });
-      if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429 && activeModel === MODELS.CONTENT) {
+          console.warn(`[Generator] ${MODELS.CONTENT} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
+          return groqJson(prompt, schema, 0, MODELS.CONTENT_FALLBACK);
+        }
+        throw new Error(`Groq API error: ${res.status}`);
+      }
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
@@ -71,23 +86,26 @@ export async function groqJson<T>(
 export async function groqText(
   prompt: string,
   retries = 2,
+  model: AiModel = MODELS.CONTENT,
 ): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
-
   let lastError: unknown;
+  let activeModel: AiModel = model;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      if (activeModel === MODELS.CONTENT || activeModel === MODELS.CONTENT_FALLBACK) {
+        console.log(`[Generator] Using model: ${activeModel}`);
+      }
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(requestTimeout(activeModel)),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model,
+          model: activeModel,
           messages: [
             {
               role: "user",
@@ -97,7 +115,13 @@ export async function groqText(
           temperature: 0,
         }),
       });
-      if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429 && activeModel === MODELS.CONTENT) {
+          console.warn(`[Generator] ${MODELS.CONTENT} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
+          return groqText(prompt, 0, MODELS.CONTENT_FALLBACK);
+        }
+        throw new Error(`Groq API error: ${res.status}`);
+      }
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };

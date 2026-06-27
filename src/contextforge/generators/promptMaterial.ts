@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
+import { MODELS } from "../../lib/ai-models";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { lockedEntries, slugify } from "./shared";
 
@@ -35,6 +36,8 @@ async function identifyScreens(spec: ProjectSpec): Promise<ScreenInfo[]> {
           `- "userActions": 2-4 primary user actions on this screen\n` +
           `Return JSON: {"screens":[...]} (max 8 screens).`,
         screensSchema,
+        1,
+        MODELS.CONTENT,
       );
       return r.screens.slice(0, 8);
     } catch {

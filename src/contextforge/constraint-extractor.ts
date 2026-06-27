@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../lib/claude";
 import type { ProjectConstraints } from "../types/projectspec";
+import { MODELS } from "../lib/ai-models";
 
 const constraintsSchema = z.object({
   mustBeOffline: z.boolean(),
@@ -89,7 +90,7 @@ Return exactly this structure:
 
 If no hard constraints exist, return the structure with empty arrays and false booleans.`;
 
-      const result = await claudeJson(`${systemPrompt}\n\n${userPrompt}`, constraintsSchema);
+      const result = await claudeJson(`${systemPrompt}\n\n${userPrompt}`, constraintsSchema, 1, MODELS.FAST);
       return result;
     } catch (err) {
       console.error("[ConstraintExtractor Error]", err);

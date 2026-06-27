@@ -2,6 +2,7 @@ import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../lib/claude";
 import { extractProjectConstraints } from "./constraint-extractor";
 import type { DraftInput } from "../types/projectspec";
+import { MODELS } from "../lib/ai-models";
 
 const discoverySchema = z.object({
   projectType: z.enum([
@@ -432,6 +433,7 @@ Your ENTIRE response must be a single JSON object matching this structure exactl
 Return valid JSON only.`,
           discoverySchema,
           0,
+          MODELS.FAST,
         );
         
         console.log('[CategoryDiscovery]', result.projectType, '—', result.classificationReason);

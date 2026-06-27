@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MODELS } from "./ai-models";
 
 /**
  * ContextForge AI engine: xAI (Grok) API.
@@ -27,7 +28,7 @@ export async function xaiJson<T>(
 ): Promise<T> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error("XAI_API_KEY is not configured");
-  const model = process.env.XAI_MODEL ?? "grok-4";
+  const model = process.env.XAI_MODEL ?? MODELS.XAI_DEFAULT;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -71,7 +72,7 @@ export async function xaiText(
 ): Promise<string> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error("XAI_API_KEY is not configured");
-  const model = process.env.XAI_MODEL ?? "grok-4";
+  const model = process.env.XAI_MODEL ?? MODELS.XAI_DEFAULT;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {

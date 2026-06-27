@@ -3,6 +3,7 @@ import { cacheGet, cacheSet, stringHash } from "../lib/cache";
 import { claudeJson, isClaudeConfigured } from "../lib/claude";
 import type { DraftInput, SuggestionCandidate } from "../types/projectspec";
 import { registryFor } from "./registry";
+import { MODELS } from "../lib/ai-models";
 
 const SUGGESTION_TTL_MS = 6 * 60 * 60 * 1000; // several hours
 
@@ -99,6 +100,8 @@ export async function suggestForCategory(
             `You MUST choose only from these candidates: ${orderedTools.map((e) => e.name).join(", ")}.\n` +
             `Return JSON: {"candidates":[{"name":"...","rationale":"..."}]}`,
           tier1Schema,
+          1,
+          MODELS.FAST,
         );
         const valid = r.candidates.filter((c) =>
           eligibleTools.some((e) => e.name.toLowerCase() === c.name.toLowerCase()),
@@ -150,6 +153,8 @@ export async function suggestForCategory(
       const r = await claudeJson(
         prompt,
         tier2Schema,
+        1,
+        MODELS.FAST,
       );
       result = {
         category,

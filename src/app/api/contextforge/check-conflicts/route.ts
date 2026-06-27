@@ -2,6 +2,7 @@ import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../../../lib/claude";
 import type { ProjectSpec } from "../../../../types/projectspec";
 import { sanitizeConflictReport } from "../../../../contextforge/conflicts";
+import { MODELS } from "../../../../lib/ai-models";
 
 const conflictItemSchema = z.object({
   severity: z.enum(["blocking", "warning"]),
@@ -117,7 +118,7 @@ If no conflicts exist return:
   "warnings": []
 }`;
 
-    const report = await claudeJson(`${systemPrompt}\n\n${userPrompt}`, conflictReportSchema);
+    const report = await claudeJson(`${systemPrompt}\n\n${userPrompt}`, conflictReportSchema, 1, MODELS.FAST);
     return Response.json(sanitizeConflictReport(report, spec));
   } catch (err) {
     console.error("[CheckConflicts Error]", err);

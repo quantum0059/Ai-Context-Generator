@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { claudeJson, claudeText, isClaudeConfigured } from "../../lib/claude";
+import { MODELS } from "../../lib/ai-models";
 import type { ProjectSpec } from "../../types/projectspec";
 
 const orderSchema = z.object({
@@ -42,6 +43,8 @@ export async function orderFeatures(
         `Order these features of project \"${spec.projectName}\" (${spec.platform}) by logical build dependency - what must exist before what. Features: ${spec.features.join("; ")}.\n` +
           `Return JSON: {"ordered":[{"feature":"<exact feature text>","reason":"..."}]} containing every feature exactly once.`,
         orderSchema,
+        1,
+        MODELS.REASONING,
       );
       const valid = r.ordered.filter((o) =>
         spec.features.some((f) => f.toLowerCase() === o.feature.toLowerCase()),
@@ -134,7 +137,7 @@ Rules for determining order:
   if (isClaudeConfigured() && spec.features.length > 0) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const response = await claudeText(systemPrompt + "\n\n" + userPrompt);
+        const response = await claudeText(systemPrompt + "\n\n" + userPrompt, 1, MODELS.REASONING);
         // Attempt to clean markdown JSON formatting if present
         const cleaned = response
           .replace(/^```json\s*/m, "")

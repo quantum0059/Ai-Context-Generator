@@ -3,6 +3,7 @@ import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { registryFor, registryByName } from "../registry";
 import type { PackageFiles, ProjectSpec, StackEntry } from "../../types/projectspec";
 import { decisionFileName, lockedEntries } from "./shared";
+import { MODELS } from "../../lib/ai-models";
 
 /** One ADR per locked category (Section 6). Prevents AI from changing architecture later. */
 export async function generateDecisions(spec: ProjectSpec): Promise<PackageFiles> {
@@ -74,7 +75,9 @@ Example: 'All database rows owned by a user must have user_id text referencing t
 
           const result = await claudeJson(
             systemPrompt + "\n\n" + userPrompt,
-            responseSchema
+            responseSchema,
+            1,
+            MODELS.REASONING,
           );
           content = result.content;
         } catch (e) {

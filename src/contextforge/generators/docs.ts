@@ -2,6 +2,7 @@ import { registryByName } from "../registry";
 import type { PackageFiles, PackageMeta, ProjectSpec } from "../../types/projectspec";
 import { lockedEntries, slugify } from "./shared";
 import { claudeText, isClaudeConfigured } from "../../lib/claude";
+import { MODELS } from "../../lib/ai-models";
 
 export function generatePackageMeta(spec: ProjectSpec): { json: string; meta: PackageMeta } {
   const meta: PackageMeta = {
@@ -730,7 +731,7 @@ A human-readable guide:
 
   if (isClaudeConfigured()) {
     try {
-      const response = await claudeText(systemPrompt + "\n\n" + userPrompt);
+      const response = await claudeText(systemPrompt + "\n\n" + userPrompt, 1, MODELS.CONTENT);
       const files: PackageFiles = {};
       const parts = response.split(/---\nFILE:\s*(.+?)\n---/g);
       for (let i = 1; i < parts.length; i += 2) {
@@ -739,7 +740,7 @@ A human-readable guide:
         if (path) files[path] = content + "\n";
       }
       if (Object.keys(files).length > 0) {
-        return files;
+        return addMissingInstallCommands(spec, files);
       }
     } catch (e) {
       // Fallback below
@@ -749,7 +750,71 @@ A human-readable guide:
   return fallbackSetup(spec);
 }
 
-function fallbackSetup(spec: ProjectSpec): PackageFiles {
+export async function getInstallCommands(
+  toolName: string,
+  platform: string,
+  isOffline: boolean,
+): Promise<string> {
+  const prompt = `Return ONLY the shell commands to install "${toolName}" in a ${platform} project.
+No explanation, no markdown, just the commands.
+${isOffline ? "The project runs offline — only include packages that work without internet after installation." : ""}
+
+Example format:
+npm install tree-sitter
+npm install tree-sitter-javascript
+npm install tree-sitter-python`;
+
+  if (isClaudeConfigured()) {
+    try {
+      const response = await claudeText(prompt, 1, MODELS.FAST);
+      const commands = response
+        .replace(/```(?:bash|sh|shell)?/gi, "")
+        .replace(/```/g, "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => /^(npm|pnpm|yarn|npx|pip|pip3|uv|cargo|go|brew|apt(?:-get)?)\s/.test(line));
+      const packageLikeName = /^(@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/i.test(toolName);
+      if (packageLikeName && !commands.some((line) => line.toLowerCase().includes(toolName.toLowerCase()))) {
+        commands.unshift(`npm install ${toolName}`);
+      }
+      if (commands.length > 0) return commands.join("\n");
+    } catch {
+      // Honest fallback below.
+    }
+  }
+
+  const packageName = toolName.trim().toLowerCase().split(/\s+\+\s+|\s+/)[0];
+  return `# Could not auto-generate install command for ${toolName}\n# Please run: npm install ${packageName}`;
+}
+
+async function addMissingInstallCommands(spec: ProjectSpec, files: PackageFiles): Promise<PackageFiles> {
+  const unknown = lockedEntries(spec)
+    .map(([, entry]) => entry.value)
+    .filter((toolName) => !registryByName(toolName));
+  if (unknown.length === 0) return files;
+
+  const isOffline = Boolean(spec.constraints.technical?.mustBeOffline)
+    || /\b(offline|no internet|without internet)\b/i.test(spec.description);
+  const generated = await Promise.all(
+    unknown.map((toolName) => getInstallCommands(toolName, spec.platform, isOffline)),
+  );
+  const commandBlock = Array.from(new Set(generated)).join("\n");
+  const shell = files["setup/install.sh"] ?? `#!/usr/bin/env bash\nset -euo pipefail\n`;
+  const powershell = files["setup/install.ps1"] ?? "";
+  const shellWithCommands = shell.includes('echo "Done."')
+    ? shell.replace('echo "Done."', `${commandBlock}\necho "Done."`)
+    : `${shell.trimEnd()}\n${commandBlock}\n`;
+  const powershellWithCommands = powershell.includes('Write-Host "Done."')
+    ? powershell.replace('Write-Host "Done."', `${commandBlock}\nWrite-Host "Done."`)
+    : `${powershell.trimEnd()}\n${commandBlock}\n`;
+  return {
+    ...files,
+    "setup/install.sh": shellWithCommands,
+    "setup/install.ps1": powershellWithCommands,
+  };
+}
+
+async function fallbackSetup(spec: ProjectSpec): Promise<PackageFiles> {
   const known: string[] = [];
   const unknown: string[] = [];
   for (const [, entry] of lockedEntries(spec)) {
@@ -758,8 +823,10 @@ function fallbackSetup(spec: ProjectSpec): PackageFiles {
     else unknown.push(entry.value);
   }
   const commands = Array.from(new Set(known));
-  const unknownLines = unknown.map(
-    (t) => `# TODO: install \"${t}\" - no registry data; consult its official docs`,
+  const isOffline = Boolean(spec.constraints.technical?.mustBeOffline)
+    || /\b(offline|no internet|without internet)\b/i.test(spec.description);
+  const unknownLines = await Promise.all(
+    unknown.map((toolName) => getInstallCommands(toolName, spec.platform, isOffline)),
   );
 
   return {

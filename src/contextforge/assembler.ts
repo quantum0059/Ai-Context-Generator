@@ -20,9 +20,19 @@ import { generateMcpToolDefinition } from "./generators/mcp-tool";
 
 /** No Generic Content rule (Section 14). */
 function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
+  const forbiddenContent = [
+    "expect(true).toBe(true)",
+    "export default function feature(): void",
+    "${" + "contextList}",
+    "# TODO: install",
+  ];
   for (const [path, content] of Object.entries(files)) {
     if (content.includes("[PLACEHOLDER]")) {
       throw new Error(`Generic content violation: ${path} contains a placeholder token`);
+    }
+    const forbidden = forbiddenContent.find((token) => content.includes(token));
+    if (forbidden) {
+      throw new Error(`Generic content violation: ${path} contains forbidden stub content: ${forbidden}`);
     }
   }
   if (!files["agents.md"]?.includes(spec.projectName)) {
@@ -38,9 +48,13 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
 export async function assemblePackage(
   spec: ProjectSpec,
 ): Promise<{ files: PackageFiles; meta: PackageMeta }> {
+  const startTime = Date.now();
   const validated = projectSpecSchema.parse(spec);
 
+  console.log("[Generator] 5% analyzing — Classifying project structure and feature order...");
   const ordered = await orderFeatures(validated);
+  console.log(`[Generator] 20% generating — Generating feature prompts (0/${validated.features.length})...`);
+  console.log("[Generator] 25% generating — Writing architecture decisions and setup files...");
   const [promptFiles, materialFiles, skillFiles, decisionFiles, templateFiles, setupFiles] =
     await Promise.all([
       generatePrompts(validated),
@@ -50,6 +64,7 @@ export async function assemblePackage(
       Promise.resolve(generateTemplates(validated)),
       generateSetup(validated),
     ]);
+  console.log("[Generator] 80% generating — Building context manifests...");
   const manifestFiles = await generateManifests(validated, promptFiles, materialFiles);
   const { json: metaJson, meta } = generatePackageMeta(validated);
 
@@ -75,5 +90,13 @@ export async function assemblePackage(
   files["mcp-server.json"] = mcpToolDefinition;
 
   assertNoGenericContent(validated, files);
+  console.log("[Generator] 100% complete — Package generation finished.");
+  const elapsed = Date.now() - startTime;
+  if (elapsed < 15_000 && validated.features.length >= 5) {
+    console.warn(
+      `[Generator] Package generated in ${elapsed}ms for ${validated.features.length} features. `
+      + "This is suspiciously fast — check for stub fallbacks.",
+    );
+  }
   return { files, meta };
 }

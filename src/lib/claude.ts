@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { groqJson, groqText, isGroqConfigured } from "./groq";
 import { xaiJson, xaiText, isXaiConfigured } from "./xai";
+import { MODELS, type AiModel } from "./ai-models";
 
 /**
  * ContextForge AI engine: unified provider gateway.
@@ -37,7 +38,7 @@ async function callClaude<T>(
 ): Promise<T> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
-  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+  const model = process.env.ANTHROPIC_MODEL ?? MODELS.ANTHROPIC_DEFAULT;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -79,7 +80,7 @@ async function callClaudeText(
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
-  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+  const model = process.env.ANTHROPIC_MODEL ?? MODELS.ANTHROPIC_DEFAULT;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -124,6 +125,7 @@ export async function claudeJson<T>(
   prompt: string,
   schema: z.ZodType<T>,
   retries = 2,
+  model: AiModel = MODELS.CONTENT,
 ): Promise<T> {
   // Prefer Claude when available
   if (process.env.ANTHROPIC_API_KEY) {
@@ -135,7 +137,7 @@ export async function claudeJson<T>(
   }
   // Fallback to Groq
   if (isGroqConfigured()) {
-    return groqJson(prompt, schema, retries);
+    return groqJson(prompt, schema, retries, model);
   }
   throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY.");
 }
@@ -146,6 +148,7 @@ export async function claudeJson<T>(
 export async function claudeText(
   prompt: string,
   retries = 2,
+  model: AiModel = MODELS.CONTENT,
 ): Promise<string> {
   // Prefer Claude when available
   if (process.env.ANTHROPIC_API_KEY) {
@@ -157,8 +160,7 @@ export async function claudeText(
   }
   // Fallback to Groq
   if (isGroqConfigured()) {
-    return groqText(prompt, retries);
+    return groqText(prompt, retries, model);
   }
   throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY.");
 }
-

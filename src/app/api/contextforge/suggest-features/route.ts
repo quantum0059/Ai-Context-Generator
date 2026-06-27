@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "@/lib/claude";
+import { MODELS } from "@/lib/ai-models";
 
 const requestSchema = z.object({
   projectName: z.string().min(1),
@@ -92,6 +93,8 @@ export async function POST(req: Request) {
         `Tailor each feature to the project's actual purpose. If this is a HEADLESS_ENGINE or BACKEND_API, do not suggest UI features like 'User Dashboard'.\n\n` +
         `Return JSON: {"features":[{"name":"Feature Name","description":"Brief description of why this feature matters for THIS project"}]}`,
       featuresSchema,
+      1,
+      MODELS.FAST,
     );
     return Response.json({ features: result.features, engine: "ai" });
   } catch (err) {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
+import { MODELS } from "../../lib/ai-models";
 import type { ProjectSpec } from "../../types/projectspec";
 import { decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
 
@@ -83,7 +84,9 @@ List any stack choices marked confidence: 'low' and tell the AI to verify their 
 
       const result = await claudeJson(
         systemPrompt + "\n\n" + userPrompt,
-        responseSchema
+        responseSchema,
+        1,
+        MODELS.CONTENT,
       );
       
       return result.content;
