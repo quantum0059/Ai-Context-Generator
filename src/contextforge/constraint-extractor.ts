@@ -11,21 +11,47 @@ const constraintsSchema = z.object({
   rawConstraints: z.array(z.string()),
 });
 
+function heuristicConstraints(description: string): ProjectConstraints {
+  const text = description.toLowerCase();
+  const mustBeOffline = /\b(fully offline|offline|no internet|without internet|local[- ]only|runs locally|air[- ]gapped)\b/.test(text);
+  const mustUseLocalStorage = /\b(sqlite|local database|embedded database|single[- ]file database|local storage|file[- ]based storage)\b/.test(text);
+  const noExternalAi = /\b(no|without)\b.{0,40}\b(external ai|ai api|external api)\b/.test(text);
+  const forbiddenTools: string[] = [];
+  if (mustBeOffline) forbiddenTools.push("Supabase", "Firebase", "Vercel");
+  if (noExternalAi) forbiddenTools.push("OpenAI", "Anthropic Claude", "Google Gemini", "Groq");
+
+  const requiredToolTypes: string[] = [];
+  if (/\b(ast|abstract syntax tree|parse source code)\b/.test(text)) requiredToolTypes.push("AST parsing library");
+  if (/\bsqlite\b/.test(text)) requiredToolTypes.push("local SQLite database");
+  if (/\b(run|runs|execute|executes|execution)\b.{0,30}\b(code|solution|solutions|java|python|javascript)\b/.test(text)) requiredToolTypes.push("local code execution");
+  if (/\b(cli|command[- ]line|terminal)\b/.test(text)) requiredToolTypes.push("CLI framework");
+
+  return {
+    mustBeOffline,
+    mustUseLocalStorage,
+    forbiddenCategories: noExternalAi ? ["aiProvider"] : [],
+    forbiddenTools,
+    requiredToolTypes,
+    rawConstraints: [
+      ...(mustBeOffline ? ["Everything must run locally without internet access"] : []),
+      ...(mustUseLocalStorage ? ["Storage must use a local embedded database"] : []),
+      ...(noExternalAi ? ["External AI APIs are not allowed"] : []),
+    ],
+  };
+}
+
 export async function extractProjectConstraints(
   description: string,
   platform: string
 ): Promise<ProjectConstraints> {
-  const empty: ProjectConstraints = {
-    mustBeOffline: false,
-    mustUseLocalStorage: false,
-    forbiddenCategories: [],
-    forbiddenTools: [],
-    requiredToolTypes: [],
-    rawConstraints: []
-  };
+  const fallback = heuristicConstraints(description);
+
+  // Explicit offline/local constraints are unambiguous and should not wait on
+  // an external provider merely to rediscover them.
+  if (fallback.mustBeOffline || fallback.mustUseLocalStorage) return fallback;
 
   if (!isClaudeConfigured()) {
-    return empty;
+    return fallback;
   }
 
   let attempts = 0;
@@ -71,5 +97,5 @@ If no hard constraints exist, return the structure with empty arrays and false b
     }
   }
 
-  return empty;
+  return fallback;
 }

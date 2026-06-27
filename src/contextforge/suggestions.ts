@@ -39,13 +39,20 @@ export interface SuggestionResult {
  * Tier 2: no registry entries -> Claude generates "Community Suggested"
  * candidates -> source "community"; uncertain tools get confidence "low",
  * which propagates into skill files as verify-against-docs warnings.
- * Results are cached per (category + platform + description-hash).
+ * Results are cached against every input that can change the recommendation.
  */
 export async function suggestForCategory(
   category: string,
   draft: DraftInput,
 ): Promise<SuggestionResult> {
-  const cacheKey = `suggest:${category}:${draft.platform}:${stringHash(draft.description)}`;
+  const recommendationContext = JSON.stringify({
+    description: draft.description,
+    features: [...draft.features].sort(),
+    budget: draft.constraints.budget ?? "",
+    avoid: [...(draft.constraints.avoid ?? [])].sort(),
+    projectType: draft.projectType ?? "",
+  });
+  const cacheKey = `suggest:${category}:${draft.platform}:${stringHash(recommendationContext)}`;
   const cached = cacheGet<SuggestionResult>(cacheKey);
   if (cached) return cached;
 
@@ -59,15 +66,27 @@ export async function suggestForCategory(
     rawConstraints: []
   };
 
+  const avoidedTools = [...techConstraints.forbiddenTools, ...(draft.constraints.avoid ?? [])]
+    .map((name) => name.toLowerCase());
   const eligibleTools = entries.filter(tool => 
-    !techConstraints.forbiddenTools.includes(tool.name) &&
+    !avoidedTools.includes(tool.name.toLowerCase()) &&
     !techConstraints.forbiddenCategories.includes(tool.category)
   );
 
   let result: SuggestionResult;
 
   if (eligibleTools.length > 0) {
-    let ranked = eligibleTools.slice(0, 3).map((e) => ({
+    const context = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+    const score = (entry: (typeof eligibleTools)[number]) => {
+      let value = entry.pros.filter((pro) => context.includes(pro.toLowerCase())).length;
+      if ((draft.constraints.budget ?? "").toLowerCase().includes("free") && entry.freeTier === "Yes") value += 3;
+      if (category.toLowerCase().includes("frontend") && draft.platform === "web" && entry.name === "Next.js") value += 5;
+      if (category.toLowerCase().includes("frontend") && draft.platform.includes("mobile") && entry.name.includes("Expo")) value += 5;
+      if (category.toLowerCase().includes("backend") && entry.name === "Fastify") value += 5;
+      return value;
+    };
+    const orderedTools = [...eligibleTools].sort((a, b) => score(b) - score(a));
+    let ranked = orderedTools.slice(0, 3).map((e) => ({
       name: e.name,
       rationale: `${e.skillGenerationHints} Pros: ${e.pros.join("; ")}.`,
     }));
@@ -77,7 +96,7 @@ export async function suggestForCategory(
           `Rank the best 2-3 tools for the "${category}" category of this project and explain why per option.\n` +
             `Project: ${draft.description}\nPlatform: ${draft.platform}\nFeatures: ${draft.features.join(", ")}\n` +
             `Budget: ${draft.constraints.budget ?? "unspecified"}\nAvoid: ${(draft.constraints.avoid ?? []).join(", ") || "nothing"}\n` +
-            `You MUST choose only from these candidates: ${eligibleTools.map((e) => e.name).join(", ")}.\n` +
+            `You MUST choose only from these candidates: ${orderedTools.map((e) => e.name).join(", ")}.\n` +
             `Return JSON: {"candidates":[{"name":"...","rationale":"..."}]}`,
           tier1Schema,
         );

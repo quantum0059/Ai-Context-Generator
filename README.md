@@ -124,8 +124,9 @@ warning propagation, manifest correctness, and the No Generic Content rule.
 - **Registry buildout**: hosting category (Vercel, Netlify, Railway) plus
   Auth0, Neon, Lemon Squeezy, Plausible, SendGrid.
 - **Templates expansion**: hook, service, repository and test templates.
-- **Image upload**: `POST /api/contextforge/upload` stores design references
-  in the Supabase `design-references` bucket; URLs flow into the ProjectSpec.
+- **Image upload**: the design-reference step accepts up to 10 JPG, PNG, WebP,
+  or GIF images. `POST /api/contextforge/upload` stores them in Cloudinary;
+  secure URLs flow into the ProjectSpec.
 - **Stripe paywall scaffold**: `POST /api/billing/checkout` (Checkout session)
   and `POST /api/billing/webhook` (signature-verified, records subscriptions).
 - **Dashboard** (`/dashboard`): lists saved packages with both versions.

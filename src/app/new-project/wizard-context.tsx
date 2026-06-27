@@ -1,16 +1,24 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import type { DiscoveredCategory } from "@/types/projectspec";
+import type { Confidence, DiscoveredCategory, StackSource } from "@/types/projectspec";
+
+interface WizardStackEntry {
+  value: string;
+  skipped: boolean;
+  source?: StackSource;
+  confidence?: Confidence;
+}
 
 export interface WizardState {
   projectName: string;
   description: string;
   features: string[];
-  stack: Record<string, { value: string; skipped: boolean; source?: "user" | "suggested" | "community" }>;
+  stack: Record<string, WizardStackEntry>;
   budget: string;
   avoid: string;
   designReferences: string;
+  designReferenceImages: string[];
   projectType?: string;
   classificationReason?: string;
   fullCategories?: DiscoveredCategory[];
@@ -20,17 +28,12 @@ const DEFAULT_STATE: WizardState = {
   projectName: "",
   description: "",
   features: [],
-  stack: {
-    "frontend-framework": { value: "Expo (React Native)", skipped: false, source: "user" },
-    "authentication": { value: "OAuth", skipped: false, source: "user" },
-    "database": { value: "Supabase (PostgreSQL)", skipped: false, source: "user" },
-    "state-management": { value: "Zustand", skipped: false, source: "user" },
-    "ai-provider": { value: "OpenAI", skipped: false, source: "user" },
-    "payments": { value: "Stripe", skipped: false, source: "user" },
-  },
+  // Stack choices are populated only after category discovery and recommendation.
+  stack: {},
   budget: "",
   avoid: "",
   designReferences: "",
+  designReferenceImages: [],
   projectType: "",
   classificationReason: "",
   fullCategories: [],
@@ -39,7 +42,7 @@ const DEFAULT_STATE: WizardState = {
 interface WizardContextProps {
   state: WizardState;
   updateState: (patch: Partial<WizardState>) => void;
-  updateStackValue: (id: string, value: string, source?: "user" | "suggested" | "community") => void;
+  updateStackValue: (id: string, value: string, source?: StackSource, confidence?: Confidence) => void;
   markStackSkipped: (id: string) => void;
   resetWizard: () => void;
 }
@@ -56,14 +59,15 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
       try {
         const spec = JSON.parse(templateSpecStr);
         // Map ProjectSpec to WizardState
-        const wizardStack: Record<string, { value: string; skipped: boolean; source: "user" | "suggested" | "community" }> = {};
+        const wizardStack: Record<string, WizardStackEntry> = {};
         if (spec.stack) {
           for (const [category, entry] of Object.entries(spec.stack)) {
-            const entryVal = entry as { value: string | null; source?: string };
+            const entryVal = entry as { value: string | null; source?: string; confidence?: Confidence };
             wizardStack[category] = {
               value: entryVal.value || "",
               skipped: entryVal.value === null,
-              source: (entryVal.source as "user" | "suggested" | "community") || "user"
+              source: (entryVal.source as StackSource) || "user",
+              confidence: entryVal.confidence,
             };
           }
         }
@@ -74,7 +78,10 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
           stack: wizardStack,
           budget: spec.constraints?.budget || "",
           avoid: (spec.constraints?.avoid || []).join(", "),
-          designReferences: (spec.designReferences || []).join(", "),
+          designReferences: (spec.designReferences || [])
+            .filter((reference: string) => !reference.includes("res.cloudinary.com"))
+            .join(", "),
+          designReferenceImages: (spec.designReferences || []).filter((reference: string) => reference.includes("res.cloudinary.com")),
           projectType: spec.projectType || "",
           classificationReason: spec.classificationReason || "",
           fullCategories: [],
@@ -91,12 +98,17 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, ...patch }));
   };
 
-  const updateStackValue = (id: string, value: string, source: "user" | "suggested" | "community" = "user") => {
+  const updateStackValue = (
+    id: string,
+    value: string,
+    source: StackSource = "user",
+    confidence: Confidence = "high",
+  ) => {
     setState((prev) => ({
       ...prev,
       stack: {
         ...prev.stack,
-        [id]: { value, skipped: false, source },
+        [id]: { value, skipped: false, source, confidence },
       },
     }));
   };
@@ -106,7 +118,7 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       stack: {
         ...prev.stack,
-        [id]: { ...prev.stack[id], skipped: true },
+        [id]: { ...(prev.stack[id] ?? { value: "", source: "user" as const }), skipped: true },
       },
     }));
   };

@@ -94,7 +94,7 @@ export interface DiscoveredCategory {
   suggestedTools?: {
     name: string;
     reason: string;
-    installCommand: string;
-    docsUrl: string;
+    installCommand?: string;
+    docsUrl?: string;
   }[];
 }

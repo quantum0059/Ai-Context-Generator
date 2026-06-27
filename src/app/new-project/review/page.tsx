@@ -18,6 +18,7 @@ import type {
   ConflictItem,
 } from "@/types/projectspec";
 import { detectStackConflicts } from "@/contextforge/conflict-detector";
+import { inferPlatform } from "@/lib/inferPlatform";
 
 function split(value: string): string[] {
   return value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
@@ -66,7 +67,7 @@ export default function ReviewPage() {
         stack[c] = {
           value: d.value,
           source: d.source || "user",
-          confidence: "high",
+          confidence: d.confidence ?? "high",
         };
       }
     }
@@ -74,12 +75,15 @@ export default function ReviewPage() {
   };
 
   const draftSpec = (): ProjectSpec => {
-    const isMobile = state.stack["frontend-framework"]?.value?.includes("Expo");
+    const inferredPlatform = inferPlatform(state.description);
+    const platform = state.stack.frontendFramework?.value?.includes("Expo")
+      ? "mobile-ios-android"
+      : inferredPlatform;
     return {
       id: lastSpec?.id || crypto.randomUUID(),
       projectName: state.projectName,
       description: state.description,
-      platform: isMobile ? "mobile-ios-android" : "web",
+      platform,
       features: state.features,
       requiredCategories: categories,
       stack: buildStack(),
@@ -87,8 +91,13 @@ export default function ReviewPage() {
         budget: state.budget || undefined,
         avoid: split(state.avoid),
       },
-      designReferences: split(state.designReferences),
+      designReferences: Array.from(new Set([
+        ...split(state.designReferences),
+        ...state.designReferenceImages,
+      ])),
       projectSpecVersion: "1.0.0",
+      projectType: state.projectType,
+      classificationReason: state.classificationReason,
     };
   };
 
@@ -263,6 +272,21 @@ export default function ReviewPage() {
                   <dt className="text-[#666] font-medium">Design References</dt>
                   <dd className="mt-1 text-xs text-[#ccc] whitespace-pre-wrap leading-relaxed">
                     {state.designReferences}
+                  </dd>
+                </div>
+              )}
+              {state.designReferenceImages.length > 0 && (
+                <div>
+                  <dt className="text-[#666] font-medium">Reference Images</dt>
+                  <dd className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {state.designReferenceImages.map((url, index) => (
+                      <img
+                        key={url}
+                        src={url}
+                        alt={`Design reference ${index + 1}`}
+                        className="aspect-square w-full rounded-md border border-white/[0.08] object-cover"
+                      />
+                    ))}
                   </dd>
                 </div>
               )}

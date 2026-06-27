@@ -35,8 +35,12 @@ export function validateEnvironment(): EnvValidationResult {
   // Supabase database (optional but required for Clerk features)
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     warnings.push(
-      "Supabase not configured. Database features and image uploads will be disabled.",
+      "Supabase not configured. Database features will be disabled.",
     );
+  }
+
+  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    warnings.push("Cloudinary not configured. Design-reference image uploads will be disabled.");
   }
 
   // Stripe billing (optional)

@@ -6,6 +6,7 @@ import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 import { Button } from "@/components/ui/button";
+import { inferPlatform } from "@/lib/inferPlatform";
 
 interface SuggestedFeature {
   name: string;
@@ -28,30 +29,35 @@ export default function FeaturesPage() {
         return;
       }
       try {
+        const platform = inferPlatform(state.description);
         // Step 1: Discover categories and project type
         let currentProjectType = state.projectType;
-        if (!currentProjectType) {
-          const discoverRes = await fetch("/api/contextforge/discover", {
+        const discoverRes = await fetch("/api/contextforge/discover", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               projectName: state.projectName,
               description: state.description,
-              platform: "web",
+              platform,
               features: state.features,
             }),
-          });
-          if (discoverRes.ok) {
+        });
+        if (discoverRes.ok) {
             const discoverData = await discoverRes.json();
-            if (discoverData.projectType) {
-              currentProjectType = discoverData.projectType;
-              updateState({
-                projectType: discoverData.projectType,
-                classificationReason: discoverData.classificationReason,
-                fullCategories: discoverData.fullCategories || [],
-              });
-            }
-          }
+            currentProjectType = discoverData.projectType || currentProjectType;
+            const fullCategories = discoverData.fullCategories?.length
+              ? discoverData.fullCategories
+              : (discoverData.requiredCategories || []).map((key: string) => ({
+                  key,
+                  label: key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter: string) => letter.toUpperCase()),
+                  reason: "Required based on the project description and selected features",
+                  relevantToProjectType: true,
+                }));
+            updateState({
+              projectType: discoverData.projectType || "",
+              classificationReason: discoverData.classificationReason || "",
+              fullCategories,
+            });
         }
 
         // Step 2: Suggest features with classification context
@@ -61,7 +67,7 @@ export default function FeaturesPage() {
           body: JSON.stringify({
             projectName: state.projectName,
             description: state.description,
-            platform: "web",
+            platform,
             projectType: currentProjectType,
           }),
         });

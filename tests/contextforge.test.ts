@@ -4,6 +4,9 @@ import { discoverCategories } from "../src/contextforge/discovery";
 import { finalizeProjectSpec } from "../src/contextforge/spec";
 import { suggestForCategory } from "../src/contextforge/suggestions";
 import type { DraftInput } from "../src/types/projectspec";
+import { inferPlatform } from "../src/lib/inferPlatform";
+import { sanitizeConflictReport } from "../src/contextforge/conflicts";
+import type { ConflictReport, ProjectSpec } from "../src/types/projectspec";
 
 const draft: DraftInput = {
   projectName: "LingoQuest",
@@ -14,6 +17,66 @@ const draft: DraftInput = {
   constraints: { budget: "free tiers only", avoid: ["Firebase"] },
 };
 
+describe("platform inference", () => {
+  it("derives mobile targets from the project description", () => {
+    expect(inferPlatform("A mobile app for iOS and Android learners")).toBe("mobile-ios-android");
+  });
+
+  it("defaults unspecified applications to web", () => {
+    expect(inferPlatform("A project management application for teams")).toBe("web");
+  });
+});
+
+describe("conflict report reconciliation", () => {
+  it("removes false conflicts for resolved custom tools and a separate local dashboard", () => {
+    const spec = {
+      id: "offline-mentor",
+      projectName: "Offline Mentor",
+      description: "A fully offline personal programming mentor with AST parsing and complexity analysis.",
+      platform: "web",
+      features: ["AST Analysis"],
+      requiredCategories: ["runtime", "astParser", "complexityAnalysis", "algorithmRecognition", "dashboardUi"],
+      stack: {
+        runtime: { value: "Node.js + TypeScript", source: "suggested" },
+        astParser: { value: "tree-sitter", source: "suggested" },
+        complexityAnalysis: { value: "Custom AST rules engine", source: "suggested" },
+        algorithmRecognition: { value: "Custom pattern matcher", source: "suggested" },
+        dashboardUi: { value: "Vite + React + Tailwind CSS", source: "suggested" },
+        codeExecution: { value: "Node.js child_process", source: "suggested" },
+      },
+      constraints: {},
+      projectSpecVersion: "1.0.0",
+      projectType: "HEADLESS_ENGINE",
+    } satisfies ProjectSpec;
+    const item = (description: string, offendingTool: string, type = "MISSING_CRITICAL_TOOL") => ({
+      severity: "blocking" as const,
+      type,
+      description,
+      offendingTool,
+      conflictingRequirement: description,
+      suggestion: "Use another tool",
+    });
+    const report: ConflictReport = {
+      hasBlockingConflicts: true,
+      hasWarnings: false,
+      conflicts: [
+        item("The project requires a custom AST rules engine, but no tool was chosen.", ""),
+        item("The project requires a custom pattern matcher, but no tool was chosen.", ""),
+        item("CPU-intensive processing is not suited to Vite + React.", "Vite + React", "PERFORMANCE_CONFLICT"),
+        item("The project is a CLI tool, but a frontend framework was chosen.", "Vite + React", "PLATFORM_CONFLICT"),
+      ],
+      warnings: [],
+    };
+
+    expect(sanitizeConflictReport(report, spec)).toEqual({
+      hasBlockingConflicts: false,
+      hasWarnings: false,
+      conflicts: [],
+      warnings: [],
+    });
+  });
+});
+
 describe("dynamic category discovery (offline heuristic)", () => {
   it("detects AI and video categories from description/features", async () => {
     const { requiredCategories, engine } = await discoverCategories(draft);
@@ -21,6 +84,70 @@ describe("dynamic category discovery (offline heuristic)", () => {
     expect(requiredCategories).toContain("aiProvider");
     expect(requiredCategories).toContain("videoProvider");
     expect(requiredCategories).toContain("authentication");
+  });
+
+  it("uses description and selected features instead of a fixed web stack", async () => {
+    const result = await discoverCategories({
+      projectName: "Code Analyzer",
+      description: "An offline headless engine that parses source code and generates analysis reports.",
+      platform: "web",
+      features: ["AST Parsing", "Report Generation"],
+      constraints: {},
+    });
+
+    expect(result.projectType).toBe("HEADLESS_ENGINE");
+    expect(result.requiredCategories).toContain("backendFramework");
+    expect(result.requiredCategories).not.toContain("frontendFramework");
+    expect(result.requiredCategories).not.toContain("styling");
+    expect(result.fullCategories?.map((category) => category.key)).toEqual(result.requiredCategories);
+  });
+
+  it("adds feature-specific categories only when selected", async () => {
+    const result = await discoverCategories({
+      projectName: "Storefront",
+      description: "A web storefront for a small catalog.",
+      platform: "web",
+      features: ["Subscription Billing"],
+      constraints: {},
+    });
+
+    expect(result.requiredCategories).toContain("payments");
+    expect(result.requiredCategories).not.toContain("aiProvider");
+  });
+
+  it("builds a local code-mentor stack without unrelated cloud concerns", async () => {
+    const result = await discoverCategories({
+      projectName: "Offline Programming Mentor",
+      description: "A fully offline personal programming mentor that parses source code into an AST, recognizes algorithms, estimates complexity, runs submitted solutions, stores skill profiles in SQLite, and recommends the next problem. No internet or external AI APIs.",
+      platform: "web",
+      features: ["AST Analysis", "Algorithm Recognition", "Complexity Analysis", "Skill Profiles", "Local Code Execution"],
+      constraints: {},
+    });
+
+    expect(result.projectType).toBe("HEADLESS_ENGINE");
+    expect(result.requiredCategories).toEqual(expect.arrayContaining([
+      "runtime",
+      "astParser",
+      "localDatabase",
+      "cliToolkit",
+      "codeExecution",
+      "dashboardUi",
+      "testingEngine",
+      "complexityAnalysis",
+      "algorithmRecognition",
+    ]));
+    expect(result.requiredCategories).not.toEqual(expect.arrayContaining([
+      "authentication",
+      "aiProvider",
+      "videoProvider",
+      "storage",
+      "mapsProvider",
+    ]));
+
+    const categories = result.fullCategories ?? [];
+    expect(categories.find((category) => category.key === "runtime")?.suggestedTools?.[0]?.name).toBe("Node.js + TypeScript");
+    expect(categories.find((category) => category.key === "astParser")?.suggestedTools?.[0]?.name).toBe("tree-sitter");
+    expect(categories.find((category) => category.key === "localDatabase")?.suggestedTools?.[0]?.name).toBe("better-sqlite3");
   });
 });
 
@@ -40,6 +167,14 @@ describe("suggestion resolution", () => {
     expect(result.tier).toBe("community");
     expect(result.candidates[0].source).toBe("community");
     expect(result.candidates[0].confidence).toBe("low");
+  });
+
+  it("does not recommend a tool explicitly avoided by the user", async () => {
+    const result = await suggestForCategory("authentication", {
+      ...draft,
+      constraints: { ...draft.constraints, avoid: ["Clerk"] },
+    });
+    expect(result.candidates.map((candidate) => candidate.name)).not.toContain("Clerk");
   });
 });
 

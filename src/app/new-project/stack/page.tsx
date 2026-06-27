@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
+  Cloud,
+  Code2,
   Cpu,
   CreditCard,
   Database,
   LayoutGrid,
   Lock,
+  Mail,
+  Palette,
+  Search,
 } from "lucide-react";
 
 import { useWizard } from "../wizard-context";
@@ -19,189 +24,198 @@ import {
   type SuggestionOption,
 } from "@/components/wizard/suggest-dialog";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
+import { inferPlatform } from "@/lib/inferPlatform";
+import type { DiscoveredCategory, SuggestionCandidate } from "@/types/projectspec";
 
-const MOCK_SUGGESTIONS: Record<string, SuggestionOption[]> = {
-  Authentication: [
-    {
-      name: "Clerk",
-      rationale: "Fast setup with hosted UI and social login for web apps.",
-    },
-    {
-      name: "Auth.js",
-      rationale: "Flexible open-source auth with many provider adapters.",
-    },
-    {
-      name: "Supabase Auth",
-      rationale: "Built-in auth if you are already using Supabase.",
-    },
-  ],
-  Database: [
-    {
-      name: "PlanetScale",
-      rationale: "Serverless MySQL with branching for rapid iteration.",
-    },
-    {
-      name: "Neon",
-      rationale: "Serverless Postgres with generous free tier.",
-    },
-    {
-      name: "MongoDB Atlas",
-      rationale: "Document database for flexible schemas.",
-    },
-  ],
-  "State Management": [
-    {
-      name: "TanStack Query",
-      rationale: "Server state caching with minimal boilerplate.",
-    },
-    {
-      name: "Jotai",
-      rationale: "Atomic state model for fine-grained updates.",
-    },
-    {
-      name: "Redux Toolkit",
-      rationale: "Predictable state for larger teams.",
-    },
-  ],
-  "AI Provider": [
-    {
-      name: "Anthropic",
-      rationale: "Strong reasoning for complex agent workflows.",
-    },
-    {
-      name: "Google Gemini",
-      rationale: "Competitive pricing with multimodal support.",
-    },
-    {
-      name: "Groq",
-      rationale: "Ultra-fast inference for real-time features.",
-    },
-  ],
-  Payments: [
-    {
-      name: "Lemon Squeezy",
-      rationale: "Merchant of record with simple tax handling.",
-    },
-    {
-      name: "Paddle",
-      rationale: "Global subscriptions with built-in compliance.",
-    },
-    {
-      name: "PayPal",
-      rationale: "Familiar checkout for broad consumer reach.",
-    },
-  ],
+const CATEGORY_META: Record<string, { title: string; description: string; icon: typeof Box }> = {
+  frontendFramework: { title: "Frontend Framework", description: "Application UI framework", icon: LayoutGrid },
+  backendFramework: { title: "Backend Framework", description: "Server or processing runtime framework", icon: Code2 },
+  cliFramework: { title: "CLI Framework", description: "Command-line interface framework", icon: Code2 },
+  authentication: { title: "Authentication", description: "Identity and access control", icon: Lock },
+  database: { title: "Database", description: "Persistent application data", icon: Database },
+  stateManagement: { title: "State Management", description: "Client-side application state", icon: Box },
+  styling: { title: "Styling", description: "UI styling and component system", icon: Palette },
+  aiProvider: { title: "AI Provider", description: "Models and AI inference", icon: Cpu },
+  payments: { title: "Payments", description: "Payments and subscriptions", icon: CreditCard },
+  hosting: { title: "Hosting", description: "Application deployment platform", icon: Cloud },
+  storage: { title: "File Storage", description: "File and object storage", icon: Database },
+  email: { title: "Email", description: "Transactional or marketing email", icon: Mail },
+  searchProvider: { title: "Search", description: "Application search infrastructure", icon: Search },
 };
 
-interface CategoryConfig {
-  id: string;
-  title: string;
-  description: string;
-  icon: typeof LayoutGrid;
-  options: string[];
-  defaultValue: string;
-  confirmed?: boolean;
-  showActions?: boolean;
+function humanizeCategory(key: string): string {
+  return key
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-const CATEGORIES: CategoryConfig[] = [
-  {
-    id: "frontend-framework",
-    title: "Frontend Framework",
-    description: "The primary framework for your application",
-    icon: LayoutGrid,
-    options: [
-      "Expo (React Native)",
-      "Next.js",
-      "Remix",
-      "Vue",
-      "SvelteKit",
-    ],
-    defaultValue: "Expo (React Native)",
-    confirmed: true,
-    showActions: false,
-  },
-  {
-    id: "authentication",
-    title: "Authentication",
-    description: "User authentication and authorization",
-    icon: Lock,
-    options: ["OAuth", "Clerk", "Auth.js", "Supabase Auth", "Custom JWT"],
-    defaultValue: "OAuth",
-  },
-  {
-    id: "database",
-    title: "Database",
-    description: "Primary database for your application",
-    icon: Database,
-    options: [
-      "Supabase (PostgreSQL)",
-      "PlanetScale",
-      "Neon",
-      "MongoDB Atlas",
-      "SQLite",
-    ],
-    defaultValue: "Supabase (PostgreSQL)",
-  },
-  {
-    id: "state-management",
-    title: "State Management",
-    description: "Client-side state management",
-    icon: Box,
-    options: ["Zustand", "TanStack Query", "Jotai", "Redux Toolkit", "Context"],
-    defaultValue: "Zustand",
-  },
-  {
-    id: "ai-provider",
-    title: "AI Provider",
-    description: "For RAG, features and AI capabilities",
-    icon: Cpu,
-    options: ["OpenAI", "Anthropic", "Google Gemini", "Groq", "Local LLM"],
-    defaultValue: "OpenAI",
-  },
-  {
-    id: "payments",
-    title: "Payments",
-    description: "Payment processing and subscriptions",
-    icon: CreditCard,
-    options: ["Stripe", "Lemon Squeezy", "Paddle", "PayPal"],
-    defaultValue: "Stripe",
-  },
-];
+function split(value: string): string[] {
+  return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+}
 
-type CategoryState = {
-  value: string;
-  skipped: boolean;
-};
+function categoryFromKey(key: string): DiscoveredCategory {
+  const meta = CATEGORY_META[key];
+  return {
+    key,
+    label: meta?.title ?? humanizeCategory(key),
+    reason: meta?.description ?? `Technology required for the ${humanizeCategory(key).toLowerCase()} concern`,
+    relevantToProjectType: true,
+    isCustom: !meta,
+  };
+}
 
 export default function StackPage() {
-  const { state, updateStackValue, markStackSkipped } = useWizard();
+  const { state, updateState, updateStackValue, markStackSkipped } = useWizard();
+  // Always rediscover on this step: selected features may have changed after
+  // the earlier project classification request.
+  const [categories, setCategories] = useState<DiscoveredCategory[]>([]);
+  const [suggestions, setSuggestions] = useState<Record<string, SuggestionOption[]>>({});
   const [suggestCategory, setSuggestCategory] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  function applySuggestion(id: string, suggestion: SuggestionOption) {
-    updateStackValue(id, suggestion.name, "suggested");
-  }
+  const featureSignature = useMemo(() => [...state.features].sort().join("|"), [state.features]);
+  const platform = useMemo(() => inferPlatform(state.description), [state.description]);
+  const categorySignature = useMemo(() => categories.map((category) => category.key).join("|"), [categories]);
 
-  const customCategories = (state.fullCategories || []).filter(c => c.isCustom);
+  // Feature discovery normally runs on the previous step. Re-run it here when
+  // entering from a template/direct URL or when no detailed categories survived.
+  useEffect(() => {
+    if (!state.projectName || state.description.length < 10) return;
 
-  let activeCategoryTitle = "";
-  let activeSuggestions: SuggestionOption[] = [];
-  
-  const standardCat = CATEGORIES.find((c) => c.id === suggestCategory);
-  if (standardCat) {
-    activeCategoryTitle = standardCat.title;
-    activeSuggestions = MOCK_SUGGESTIONS[standardCat.title] ?? [];
-  } else if (suggestCategory) {
-    const customCat = customCategories.find((c) => c.key === suggestCategory);
-    if (customCat) {
-      activeCategoryTitle = customCat.label;
-      activeSuggestions = (customCat.suggestedTools || []).map(t => ({
-        name: t.name,
-        rationale: t.reason,
-        installCommand: t.installCommand,
-      }));
+    let cancelled = false;
+    async function discover() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch("/api/contextforge/discover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectName: state.projectName,
+            description: state.description,
+            platform,
+            features: state.features,
+            constraints: { budget: state.budget || undefined, avoid: split(state.avoid) },
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not determine required stack categories");
+
+        const discovered: DiscoveredCategory[] = data.fullCategories?.length
+          ? data.fullCategories
+          : (data.requiredCategories ?? []).map(categoryFromKey);
+        const relevant = discovered.filter((category) => category.relevantToProjectType !== false);
+        if (!relevant.length) throw new Error("No relevant technology categories were discovered");
+        if (cancelled) return;
+        setCategories(relevant);
+        const allowed = new Set(relevant.map((category) => category.key));
+        const relevantStack = Object.fromEntries(
+          Object.entries(state.stack).filter(([key]) => allowed.has(key)),
+        );
+        updateState({
+          fullCategories: relevant,
+          stack: relevantStack,
+          projectType: data.projectType ?? state.projectType,
+          classificationReason: data.classificationReason ?? state.classificationReason,
+        });
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Stack discovery failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  }
+    discover();
+    return () => { cancelled = true; };
+    // The signatures represent all user inputs that should trigger fresh discovery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.projectName, state.description, featureSignature, state.budget, state.avoid]);
+
+  // Resolve a ranked recommendation plus alternatives for every required category.
+  useEffect(() => {
+    if (!categorySignature) return;
+    let cancelled = false;
+
+    async function recommendStack() {
+      setLoading(true);
+      setError(null);
+      try {
+        const draft = {
+          projectName: state.projectName,
+          description: state.description,
+          platform,
+          features: state.features,
+          constraints: { budget: state.budget || undefined, avoid: split(state.avoid) },
+          projectType: state.projectType,
+          classificationReason: state.classificationReason,
+        };
+
+        const resolved = await Promise.all(categories.map(async (category) => {
+          const discoveredOptions: SuggestionOption[] = (category.suggestedTools ?? []).map((tool) => ({
+            name: tool.name,
+            rationale: tool.reason,
+            installCommand: tool.installCommand,
+            source: "community",
+            confidence: "high",
+          }));
+          // Discovery already supplied grounded tools for specialized concerns.
+          // Use them immediately instead of replacing them with generic AI output.
+          if (category.isCustom && discoveredOptions.length > 0) {
+            return [category.key, discoveredOptions] as const;
+          }
+          try {
+            const response = await fetch("/api/contextforge/suggest", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ category: category.key, draft }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error ?? "Recommendation failed");
+            const apiOptions = (data.candidates as SuggestionCandidate[]).map((candidate) => ({
+              name: candidate.name,
+              rationale: candidate.rationale,
+              source: candidate.source,
+              confidence: candidate.confidence,
+            }));
+            const primaryOptions = category.isCustom ? discoveredOptions : apiOptions;
+            const alternativeOptions = category.isCustom ? apiOptions : discoveredOptions;
+            const names = new Set(primaryOptions.map((option) => option.name.toLowerCase()));
+            return [category.key, [...primaryOptions, ...alternativeOptions.filter((option) => !names.has(option.name.toLowerCase()))]] as const;
+          } catch {
+            return [category.key, discoveredOptions] as const;
+          }
+        }));
+
+        if (cancelled) return;
+        const nextSuggestions: Record<string, SuggestionOption[]> = Object.fromEntries(
+          resolved.map(([key, options]) => [key, [...options]]),
+        );
+        setSuggestions(nextSuggestions);
+        for (const category of categories) {
+          const top = nextSuggestions[category.key]?.[0];
+          if (top && !state.stack[category.key]?.value && !state.stack[category.key]?.skipped) {
+            updateStackValue(category.key, top.name, top.source ?? "suggested", top.confidence ?? "high");
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Stack recommendation failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    recommendStack();
+    return () => { cancelled = true; };
+    // categorySignature and the input signatures intentionally control refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categorySignature, state.description, featureSignature, state.budget, state.avoid]);
+
+  const activeCategory = categories.find((category) => category.key === suggestCategory);
+  const activeSuggestions = suggestCategory ? suggestions[suggestCategory] ?? [] : [];
+  const selectionComplete = categories.length > 0 && categories.every((category) => {
+    const entry = state.stack[category.key];
+    return Boolean(entry?.value || entry?.skipped);
+  });
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] pb-16 text-white">
@@ -210,52 +224,53 @@ export default function StackPage() {
 
       <main className="mx-auto max-w-[680px] px-4 py-10">
         <div className="text-center">
-          <h1 className="text-[28px] font-bold text-white">
-            Choose Your Tech Stack
-          </h1>
-          <p className="mx-auto mt-3 max-w-[480px] text-sm text-[#888]">
-            Select the tech stack you want to work with. AI suggestions are
-            tailored to your case.
+          <h1 className="text-[28px] font-bold text-white">Recommended Tech Stack</h1>
+          <p className="mx-auto mt-3 max-w-[520px] text-sm text-[#888]">
+            Based on your description and selected features. The first choice is recommended; use “Suggest for me” to compare alternatives.
           </p>
+          {state.projectType && (
+            <p className="mt-2 text-xs text-[#666]">
+              Architecture: {state.projectType.replaceAll("_", " ")}
+              {state.classificationReason ? ` — ${state.classificationReason}` : ""}
+            </p>
+          )}
         </div>
 
-        <div className="mt-8 space-y-3">
-          {CATEGORIES.map((category) => (
-            <StackCategoryRow
-              key={category.id}
-              title={category.title}
-              description={category.description}
-              icon={category.icon}
-              options={category.options}
-              value={state.stack[category.id]?.value ?? category.defaultValue}
-              onValueChange={(value) => updateStackValue(category.id, value, "user")}
-              confirmed={category.confirmed}
-              skipped={state.stack[category.id]?.skipped ?? false}
-              showActions={category.showActions !== false}
-              onSuggest={() => setSuggestCategory(category.id)}
-              onNotNeeded={() => markStackSkipped(category.id)}
-            />
-          ))}
+        {loading && categories.length === 0 && (
+          <div className="mt-8 rounded-xl border border-white/[0.08] bg-[#111] p-10 text-center text-sm text-[#888]">
+            Analyzing your project and building a relevant stack…
+          </div>
+        )}
 
-          {customCategories.map((customCat) => {
-            const options = (customCat.suggestedTools || []).map((t) => t.name);
-            if (options.length === 0) options.push("Custom"); // fallback
-            
+        {error && (
+          <div className="mt-8 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-400">{error}</div>
+        )}
+
+        <div className="mt-8 space-y-3">
+          {categories.map((category) => {
+            const meta = CATEGORY_META[category.key];
+            const options = suggestions[category.key] ?? [];
+            const current = state.stack[category.key]?.value;
+            const optionNames = Array.from(new Set([
+              ...(current ? [current] : []),
+              ...options.map((option) => option.name),
+            ])).filter(Boolean);
+
             return (
               <StackCategoryRow
-                key={customCat.key}
-                title={customCat.label}
-                description={customCat.reason}
-                icon={Box}
-                options={options}
-                value={state.stack[customCat.key]?.value ?? options[0]}
-                onValueChange={(value) => updateStackValue(customCat.key, value, "user")}
-                confirmed={false}
-                skipped={state.stack[customCat.key]?.skipped ?? false}
+                key={category.key}
+                title={category.label || meta?.title || humanizeCategory(category.key)}
+                description={category.reason || meta?.description || "Required by this project"}
+                icon={meta?.icon ?? Box}
+                options={optionNames}
+                value={current ?? ""}
+                onValueChange={(value) => updateStackValue(category.key, value, "user", "high")}
+                confirmed={Boolean(current) && state.stack[category.key]?.source !== "user"}
+                skipped={state.stack[category.key]?.skipped ?? false}
                 showActions={true}
-                onSuggest={() => setSuggestCategory(customCat.key)}
-                onNotNeeded={() => markStackSkipped(customCat.key)}
-                isCustom={true}
+                onSuggest={() => setSuggestCategory(category.key)}
+                onNotNeeded={() => markStackSkipped(category.key)}
+                isCustom={category.isCustom ?? !meta}
               />
             );
           })}
@@ -265,19 +280,21 @@ export default function StackPage() {
       <WizardBottomNav
         backHref="/new-project/features"
         continueHref="/new-project/continuous"
+        continueDisabled={loading || !selectionComplete}
       />
 
-      {suggestCategory && (
+      {suggestCategory && activeCategory && (
         <SuggestDialog
-          open={suggestCategory !== null}
-          onOpenChange={(open) => {
-            if (!open) setSuggestCategory(null);
-          }}
-          categoryTitle={activeCategoryTitle}
+          open
+          onOpenChange={(open) => { if (!open) setSuggestCategory(null); }}
+          categoryTitle={activeCategory.label || humanizeCategory(activeCategory.key)}
           suggestions={activeSuggestions}
-          onSelect={(suggestion) =>
-            applySuggestion(suggestCategory, suggestion)
-          }
+          onSelect={(suggestion) => updateStackValue(
+            suggestCategory,
+            suggestion.name,
+            suggestion.source ?? "suggested",
+            suggestion.confidence ?? "high",
+          )}
         />
       )}
     </div>

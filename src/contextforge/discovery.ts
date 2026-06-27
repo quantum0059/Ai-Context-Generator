@@ -24,8 +24,8 @@ const discoverySchema = z.object({
         z.object({
           name: z.string(),
           reason: z.string(),
-          installCommand: z.string(),
-          docsUrl: z.string()
+          installCommand: z.string().optional(),
+          docsUrl: z.string().optional(),
         })
       ).optional(),
     }),
@@ -37,17 +37,6 @@ const discoverySchema = z.object({
     }),
   ).optional(),
 });
-
-const PLATFORM_BASE: Record<string, string[]> = {
-  web: ["frontendFramework", "styling", "stateManagement", "database", "authentication", "hosting"],
-  "mobile-ios-android": ["frontendFramework", "styling", "stateManagement", "database", "authentication"],
-  ios: ["frontendFramework", "styling", "stateManagement", "database", "authentication"],
-  android: ["frontendFramework", "styling", "stateManagement", "database", "authentication"],
-  desktop: ["frontendFramework", "styling", "stateManagement", "database"],
-  "browser-extension": ["frontendFramework", "stateManagement", "storage"],
-  "backend-only": ["backendFramework", "database", "authentication", "hosting"],
-  cli: ["backendFramework"],
-};
 
 const KEYWORD_TRIGGERS: Array<{ keywords: string[]; category: string }> = [
   { keywords: ["ai", "chat", "tutor", "assistant", "llm", "gpt"], category: "aiProvider" },
@@ -62,14 +51,185 @@ const KEYWORD_TRIGGERS: Array<{ keywords: string[]; category: string }> = [
   { keywords: ["search", "full-text"], category: "searchProvider" },
 ];
 
-function heuristicCategories(draft: DraftInput): string[] {
-  const base = PLATFORM_BASE[draft.platform] ?? PLATFORM_BASE.web;
+function hasKeyword(text: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(text);
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  frontendFramework: "Frontend Framework",
+  backendFramework: "Backend Framework",
+  cliFramework: "CLI Framework",
+  styling: "Styling",
+  stateManagement: "State Management",
+  database: "Database",
+  authentication: "Authentication",
+  hosting: "Hosting",
+  aiProvider: "AI Provider",
+  videoProvider: "Video Provider",
+  payments: "Payments",
+  email: "Email",
+  storage: "File Storage",
+  analytics: "Analytics",
+  monitoring: "Monitoring",
+  walletProvider: "Wallet Provider",
+  mapsProvider: "Maps Provider",
+  searchProvider: "Search Provider",
+};
+
+function heuristicProjectType(draft: DraftInput): string {
   const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+  if (/\b(cli|command[- ]line|terminal tool)\b/.test(text)) return "CLI_TOOL";
+  if (/\b(library|sdk|npm package|developer package)\b/.test(text)) return "LIBRARY_OR_SDK";
+  if (/\b(headless|engine|parser|compiler|generator|processing pipeline)\b/.test(text)) return "HEADLESS_ENGINE";
+  if (/\b(backend api|rest api|graphql api|api service|microservice)\b/.test(text)) return "BACKEND_API";
+  return "UI_APPLICATION";
+}
+
+function heuristicCategories(draft: DraftInput, projectType: string): string[] {
+  const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+  const uiPlatform = ["web", "mobile-ios-android", "ios", "android", "desktop", "browser-extension"].includes(draft.platform);
+  let base: string[];
+  if (projectType === "CLI_TOOL") base = ["cliFramework"];
+  else if (projectType === "LIBRARY_OR_SDK") base = [];
+  else if (projectType === "HEADLESS_ENGINE") base = ["backendFramework"];
+  else if (projectType === "BACKEND_API") base = ["backendFramework", "hosting"];
+  else base = uiPlatform ? ["frontendFramework", "styling", "stateManagement", ...(draft.platform === "web" ? ["hosting"] : [])] : ["backendFramework"];
+
   const result = new Set<string>(base);
+  const personalOffline = /\b(personal|single[- ]user)\b/.test(text) && /\b(offline|local)\b/.test(text);
+  if (!personalOffline && /\b(auth|authentication|login|sign[ -]?in|account|profile|user|team)\b/.test(text)) result.add("authentication");
+  if (/\b(database|persist|store data|records|tasks|projects|content|profile|user|realtime)\b/.test(text)) result.add("database");
   for (const { keywords, category } of KEYWORD_TRIGGERS) {
-    if (keywords.some((k) => text.includes(k))) result.add(category);
+    if (category === "aiProvider" && /\b(no external ai|without external ai|no ai api)\b/.test(text)) continue;
+    if (keywords.some((keyword) => hasKeyword(text, keyword))) result.add(category);
   }
   return Array.from(result);
+}
+
+function tool(
+  name: string,
+  reason: string,
+  installCommand?: string,
+  docsUrl?: string,
+) {
+  return { name, reason, installCommand, docsUrl };
+}
+
+function offlineCodeAnalysisCategories(draft: DraftInput) {
+  const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+  const categories = [
+    {
+      key: "runtime",
+      label: "Runtime",
+      reason: "Runs the complete mentor engine locally across operating systems",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Node.js + TypeScript", "Offline, cross-platform, and well suited to AST tooling and local process orchestration", "npm install -D typescript @types/node", "https://nodejs.org/docs/latest/api/"),
+        tool("Python 3", "Strong parsing and analysis ecosystem if Python is preferred", undefined, "https://docs.python.org/3/"),
+      ],
+    },
+    {
+      key: "astParser",
+      label: "AST Parsing",
+      reason: "Parses submitted Java, Python, and JavaScript code for structural analysis",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("tree-sitter", "Multi-language, fully offline, incremental, and production-grade", "npm install tree-sitter", "https://tree-sitter.github.io/tree-sitter/"),
+        tool("@babel/parser", "Excellent alternative when analysis is limited to JavaScript and TypeScript", "npm install @babel/parser", "https://babeljs.io/docs/babel-parser"),
+      ],
+    },
+    {
+      key: "localDatabase",
+      label: "Local Database",
+      reason: "Persists learner profiles, submissions, scores, and recommendations in one offline file",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("better-sqlite3", "Fast synchronous SQLite for a local single-user engine", "npm install better-sqlite3", "https://github.com/WiseLibs/better-sqlite3"),
+        tool("sqlite3", "Widely used asynchronous SQLite binding", "npm install sqlite3", "https://github.com/TryGhost/node-sqlite3"),
+      ],
+    },
+    {
+      key: "cliToolkit",
+      label: "CLI Toolkit",
+      reason: "Provides a focused local interface for selecting problems and submitting solutions",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Commander + Inquirer + Chalk", "Standard Node.js toolkit for commands, interactive prompts, and readable terminal feedback", "npm install commander inquirer chalk", "https://github.com/tj/commander.js"),
+        tool("oclif", "Structured alternative for a larger extensible CLI", "npm install @oclif/core", "https://oclif.io/"),
+      ],
+    },
+    {
+      key: "codeExecution",
+      label: "Code Execution",
+      reason: "Executes Java, Python, and JavaScript submissions locally against test cases",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Node.js child_process", "Built-in local process runner for language compilers and interpreters; add timeouts and resource limits", undefined, "https://nodejs.org/api/child_process.html"),
+        tool("isolated-vm", "Stronger isolation alternative specifically for untrusted JavaScript", "npm install isolated-vm", "https://github.com/laverdet/isolated-vm"),
+      ],
+    },
+    {
+      key: "testingEngine",
+      label: "Testing Engine",
+      reason: "Runs public and hidden test cases and verifies expected behavior",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Vitest", "Fast local test runner that integrates cleanly with TypeScript", "npm install -D vitest", "https://vitest.dev/"),
+        tool("Node.js test runner", "Dependency-free alternative built into Node.js", undefined, "https://nodejs.org/api/test.html"),
+      ],
+    },
+    {
+      key: "complexityAnalysis",
+      label: "Complexity Analysis",
+      reason: "Estimates time and space complexity from loops, recursion, calls, and data structures",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Custom AST rules engine", "Complexity inference is domain-specific; deterministic rules over the AST are more appropriate than a generic service"),
+        tool("tree-sitter queries", "Declarative patterns can identify nested loops, recursion, and data-structure operations", undefined, "https://tree-sitter.github.io/tree-sitter/using-parsers/queries/1-syntax.html"),
+      ],
+    },
+    {
+      key: "algorithmRecognition",
+      label: "Algorithm Recognition",
+      reason: "Matches implementation structure against known algorithm and concept patterns",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Custom pattern matcher", "Tree-sitter queries and normalized AST patterns can recognize algorithms completely offline"),
+        tool("tree-sitter queries", "Reusable structural query patterns are a strong base for concept detection", undefined, "https://tree-sitter.github.io/tree-sitter/using-parsers/queries/1-syntax.html"),
+      ],
+    },
+  ];
+
+  if (/\b(skill profiles?|scores? per topic|dashboard|visual|progress)\b/.test(text)) {
+    categories.splice(5, 0, {
+      key: "dashboardUi",
+      label: "Dashboard UI",
+      reason: "Displays topic scores, recurring weaknesses, submission history, and next-problem recommendations locally",
+      relevantToProjectType: true,
+      isCustom: true,
+      suggestedTools: [
+        tool("Vite + React + Tailwind CSS", "Lightweight local-only dashboard with a fast TypeScript development workflow", "npm create vite@latest dashboard -- --template react-ts", "https://vite.dev/guide/"),
+        tool("Ink", "Terminal UI alternative if a browser dashboard is unnecessary", "npm install ink react", "https://github.com/vadimdemedes/ink"),
+      ],
+    });
+  }
+  return categories;
+}
+
+function isOfflineCodeAnalysisProject(draft: DraftInput): boolean {
+  const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+  return /\b(offline|runs locally|no internet)\b/.test(text)
+    && /\b(ast|abstract syntax tree|source code|code review|code analysis)\b/.test(text)
+    && /\b(mentor|algorithm|complexity|skill profile|programming)\b/.test(text);
 }
 
 /**
@@ -89,6 +249,20 @@ export async function discoverCategories(
   const extractedConstraints = await extractProjectConstraints(draft.description, draft.platform);
   draft.constraints.technical = extractedConstraints;
   console.log('[ConstraintExtractor]', JSON.stringify(extractedConstraints, null, 2));
+
+  // This domain has precise offline architecture requirements. Resolve those
+  // deterministically, then let the suggestion step offer alternatives within
+  // each relevant concern instead of inventing unrelated cloud categories.
+  if (isOfflineCodeAnalysisProject(draft)) {
+    const fullCategories = offlineCodeAnalysisCategories(draft);
+    return {
+      requiredCategories: fullCategories.map((category) => category.key),
+      fullCategories,
+      engine: "heuristic",
+      projectType: "HEADLESS_ENGINE",
+      classificationReason: "The core product is a fully offline code-analysis and adaptive-learning engine with optional local interfaces.",
+    };
+  }
 
   if (isClaudeConfigured()) {
     let attempts = 0;
@@ -257,6 +431,7 @@ Your ENTIRE response must be a single JSON object matching this structure exactl
 
 Return valid JSON only.`,
           discoverySchema,
+          0,
         );
         
         console.log('[CategoryDiscovery]', result.projectType, '—', result.classificationReason);
@@ -275,5 +450,21 @@ Return valid JSON only.`,
       }
     }
   }
-  return { requiredCategories: heuristicCategories(draft), engine: "heuristic" };
+  const projectType = heuristicProjectType(draft);
+  const requiredCategories = heuristicCategories(draft, projectType);
+  // Even an unusual library needs at least one explicit technical concern.
+  if (requiredCategories.length === 0) requiredCategories.push("packageTooling");
+  return {
+    requiredCategories,
+    fullCategories: requiredCategories.map((key) => ({
+      key,
+      label: CATEGORY_LABELS[key] ?? key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      reason: `Required by the project description or selected features for this ${projectType.toLowerCase().replaceAll("_", " ")}`,
+      relevantToProjectType: true,
+      isCustom: !CATEGORY_LABELS[key],
+    })),
+    engine: "heuristic",
+    projectType,
+    classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} from the project description and selected features.`,
+  };
 }

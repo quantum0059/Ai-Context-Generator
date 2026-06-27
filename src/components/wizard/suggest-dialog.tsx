@@ -8,11 +8,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import type { Confidence, StackSource } from "@/types/projectspec";
 
 export interface SuggestionOption {
   name: string;
   rationale: string;
   installCommand?: string;
+  source?: Exclude<StackSource, "user">;
+  confidence?: Confidence;
 }
 
 interface SuggestDialogProps {
@@ -47,6 +50,11 @@ export function SuggestDialog({
         </DialogHeader>
 
         <div className="space-y-2">
+          {suggestions.length === 0 && (
+            <p className="rounded-lg border border-white/[0.08] p-3 text-sm text-[#888]">
+              No alternatives are available for this category yet.
+            </p>
+          )}
           {suggestions.map((suggestion) => (
             <button
               key={suggestion.name}

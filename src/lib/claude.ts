@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { groqJson, groqText, isGroqConfigured } from "./groq";
+import { xaiJson, xaiText, isXaiConfigured } from "./xai";
 
 /**
  * ContextForge AI engine: unified provider gateway.
@@ -16,7 +17,7 @@ import { groqJson, groqText, isGroqConfigured } from "./groq";
 
 /** Returns true if ANY AI backend (Claude or Groq) is configured. */
 export function isClaudeConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY) || isGroqConfigured();
+  return Boolean(process.env.ANTHROPIC_API_KEY) || isGroqConfigured() || isXaiConfigured();
 }
 
 function extractJson(text: string): string {
@@ -128,11 +129,15 @@ export async function claudeJson<T>(
   if (process.env.ANTHROPIC_API_KEY) {
     return callClaude(prompt, schema, retries);
   }
+  // Try xAI
+  if (isXaiConfigured()) {
+    return xaiJson(prompt, schema, retries);
+  }
   // Fallback to Groq
   if (isGroqConfigured()) {
     return groqJson(prompt, schema, retries);
   }
-  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.");
+  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY.");
 }
 
 /**
@@ -146,10 +151,14 @@ export async function claudeText(
   if (process.env.ANTHROPIC_API_KEY) {
     return callClaudeText(prompt, retries);
   }
+  // Try xAI
+  if (isXaiConfigured()) {
+    return xaiText(prompt, retries);
+  }
   // Fallback to Groq
   if (isGroqConfigured()) {
     return groqText(prompt, retries);
   }
-  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.");
+  throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY, GROQ_API_KEY, or XAI_API_KEY.");
 }
 

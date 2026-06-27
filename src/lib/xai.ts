@@ -1,11 +1,13 @@
+import { z } from "zod";
+
 /**
- * ContextForge AI engine: Groq API.
+ * ContextForge AI engine: xAI (Grok) API.
  * Uses the OpenAI-compatible chat completions endpoint.
- * All calls return schema-validated JSON with retries, matching claude.ts behaviour.
+ * All calls return schema-validated JSON with retries.
  */
 
-export function isGroqConfigured(): boolean {
-  return Boolean(process.env.GROQ_API_KEY);
+export function isXaiConfigured(): boolean {
+  return Boolean(process.env.XAI_API_KEY);
 }
 
 function extractJson(text: string): string {
@@ -18,25 +20,20 @@ function extractJson(text: string): string {
   return text.slice(start, end + 1);
 }
 
-import { z } from "zod";
-
-const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 15_000);
-
-export async function groqJson<T>(
+export async function xaiJson<T>(
   prompt: string,
   schema: z.ZodType<T>,
   retries = 2,
 ): Promise<T> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) throw new Error("XAI_API_KEY is not configured");
+  const model = process.env.XAI_MODEL ?? "grok-4";
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -53,7 +50,7 @@ export async function groqJson<T>(
           temperature: 0,
         }),
       });
-      if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
+      if (!res.ok) throw new Error(`xAI API error: ${res.status}`);
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
@@ -65,23 +62,22 @@ export async function groqJson<T>(
       lastError = err;
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Groq call failed");
+  throw lastError instanceof Error ? lastError : new Error("xAI call failed");
 }
 
-export async function groqText(
+export async function xaiText(
   prompt: string,
   retries = 2,
 ): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
-  const model = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) throw new Error("XAI_API_KEY is not configured");
+  const model = process.env.XAI_MODEL ?? "grok-4";
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -97,7 +93,7 @@ export async function groqText(
           temperature: 0,
         }),
       });
-      if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
+      if (!res.ok) throw new Error(`xAI API error: ${res.status}`);
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
@@ -107,5 +103,5 @@ export async function groqText(
       lastError = err;
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Groq text call failed");
+  throw lastError instanceof Error ? lastError : new Error("xAI text call failed");
 }
