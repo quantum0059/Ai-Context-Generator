@@ -41,6 +41,16 @@ const CATEGORY_ALIASES: Record<string, string> = {
   analytics: "analytics",
   monitoring: "monitoring",
   storage: "storage",
+  orm: "orm",
+  objectrelationalmapper: "orm",
+  testing: "testing",
+  tests: "testing",
+  testframework: "testing",
+  bundler: "bundler",
+  runtime: "runtime",
+  forms: "forms",
+  formvalidation: "forms",
+  i18n: "i18n",
 };
 
 export function normalizeCategory(category: string): string {

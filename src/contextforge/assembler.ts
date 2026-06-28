@@ -19,6 +19,7 @@ import { generateSkills } from "./generators/skills";
 import { generateMcpToolDefinition } from "./generators/mcp-tool";
 import { buildSharedContext } from "./generators/shared";
 import { validateGeneratedPackage, type ValidationResult } from "./validators/stack-validator";
+import { generateRequirementsDoc } from "./generators/requirements";
 
 /** No Generic Content rule (Section 14). */
 function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
@@ -94,6 +95,7 @@ export async function assemblePackage(
   const files: PackageFiles = {
     "README.md": generatePackageReadme(validated),
     "agents.md": agentsContent,
+    "requirements.md": generateRequirementsDoc(validated),
     "ai-context.json": generateAiContext(validated),
     "package-meta.json": metaJson,
     "roadmap.md": generateRoadmap(validated, ordered),

@@ -18,10 +18,15 @@ export function validateEnvironment(): EnvValidationResult {
     errors.push("NEXT_PUBLIC_APP_URL is required in production");
   }
 
-  // AI engine (Claude or Grok — at least one recommended)
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.XAI_API_KEY) {
+  // AI engine (at least one recommended)
+  if (
+    !process.env.ANTHROPIC_API_KEY &&
+    !process.env.XAI_API_KEY &&
+    !process.env.NVIDIA_API_KEY &&
+    !process.env.GROQ_API_KEY
+  ) {
     warnings.push(
-      "No AI provider configured (ANTHROPIC_API_KEY or XAI_API_KEY). AI-powered features will use heuristic fallbacks.",
+      "No AI provider configured (ANTHROPIC_API_KEY, XAI_API_KEY, NVIDIA_API_KEY, or GROQ_API_KEY). AI-powered features will use heuristic fallbacks.",
     );
   }
 

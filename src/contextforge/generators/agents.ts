@@ -1,8 +1,69 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
-import type { ProjectSpec } from "../../types/projectspec";
+import type { ProjectSpec, ArchitecturalRequirements } from "../../types/projectspec";
 import { buildConstraintBlock, decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
+
+/** Formats ArchitecturalRequirements into a compact context block for AI prompts */
+function buildRequirementsBlock(req: ArchitecturalRequirements): string {
+  const fr = req.functional
+    .map((r) => `  - [${r.id}] ${r.type === "implicit" ? "*(implicit)* " : ""}**${r.title}** (${r.priority}): ${r.description}`)
+    .join("\n");
+
+  const nfr = [
+    ...req.nonFunctional.performance.map((s) => `  - [PERF] ${s}`),
+    ...req.nonFunctional.security.map((s) => `  - [SEC] ${s}`),
+    ...req.nonFunctional.scalability.map((s) => `  - [SCALE] ${s}`),
+    ...req.nonFunctional.availability.map((s) => `  - [AVAIL] ${s}`),
+    ...req.nonFunctional.accessibility.map((s) => `  - [A11Y] ${s}`),
+    ...req.nonFunctional.compliance.map((s) => `  - [COMPLIANCE] ${s}`),
+    ...req.nonFunctional.maintainability.map((s) => `  - [MAINT] ${s}`),
+    ...req.nonFunctional.other.map((s) => `  - [OTHER] ${s}`),
+  ].join("\n");
+
+  const edges = req.edgeCases
+    .map((e) => `  - [${e.category.toUpperCase()}] **${e.scenario}** → ${e.expectedBehaviour}`)
+    .join("\n");
+
+  const entities = req.domain.entities
+    .map((e) => `  - **${e.name}**: ${e.description} | attrs: ${e.attributes.join(", ")}`)
+    .join("\n");
+
+  const actors = req.domain.actors
+    .map((a) => `  - **${a.name}**: ${a.description}${a.permissions?.length ? ` | can: ${a.permissions.join(", ")}` : ""}`)
+    .join("\n");
+
+  return `
+## Extracted Architectural Requirements
+
+### Business Goals
+${req.businessGoals.map((g) => `- ${g}`).join("\n")}
+
+### Success Criteria
+${req.successCriteria.map((c) => `- ${c}`).join("\n")}
+
+### Target Audience
+${req.targetAudience.map((a) => `- ${a}`).join("\n")}
+
+### Domain Model
+**Actors:**
+${actors}
+
+**Core Entities:**
+${entities}
+
+**Core Workflows:** ${req.domain.coreWorkflows.join("; ")}
+
+### Functional Requirements
+${fr}
+
+### Non-Functional Requirements
+${nfr}
+
+### Edge Cases & Failure Modes
+${edges}
+`;
+}
 
 /** agents.md - the AI constitution (Section 7), generated solely from the finalized ProjectSpec. */
 export async function generateAgents(spec: ProjectSpec): Promise<string> {
@@ -10,6 +71,8 @@ export async function generateAgents(spec: ProjectSpec): Promise<string> {
   const stackSummary = locked.map(([category, entry]) => `- ${category}: ${entry.value}`).join("\n");
 
   const constraintBlock = buildConstraintBlock(spec);
+  const req = spec.architecturalRequirements as ArchitecturalRequirements | undefined;
+  const requirementsBlock = req ? buildRequirementsBlock(req) : "";
 
   const systemPrompt = `${constraintBlock}You are an expert software architect writing an AI development constitution for a specific project. This document will be fed to AI coding assistants (Claude, Cursor, ChatGPT, Copilot) as their primary instruction file. It must be so specific that an AI reading it produces architecturally correct code on the first attempt without any additional explanation from the developer.
 
@@ -21,7 +84,8 @@ Rules for what you write:
 - Include the exact error handling contract this project uses with a code snippet
 - Include exact import patterns (which package to import from for each concern)
 - Never write generic advice that applies to all projects
-- Every sentence must only be true for THIS specific project's stack`;
+- Every sentence must only be true for THIS specific project's stack
+- The extracted requirements below define WHAT this system must do — write architecture rules that ensure the code delivers exactly these requirements`;
 
   const userPrompt = `Generate a complete agents.md AI constitution for this project:
 
@@ -34,7 +98,7 @@ ${stackSummary}
 
 Features being built:
 ${spec.features.join(", ")}
-
+${requirementsBlock}
 The agents.md must contain ALL of these sections:
 
 ## Project Overview

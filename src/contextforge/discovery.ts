@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../lib/claude";
-import { extractProjectConstraints } from "./constraint-extractor";
+import { extractArchitecturalRequirements } from "./requirement-extractor";
 import type { DraftInput } from "../types/projectspec";
 import { MODELS } from "../lib/ai-models";
 
@@ -247,9 +247,17 @@ export async function discoverCategories(
   classificationReason?: string;
   fullCategories?: any[];
 }> {
-  const extractedConstraints = await extractProjectConstraints(draft.description, draft.platform);
-  draft.constraints.technical = extractedConstraints;
-  console.log('[ConstraintExtractor]', JSON.stringify(extractedConstraints, null, 2));
+  const architecturalRequirements = await extractArchitecturalRequirements(
+    draft.description,
+    draft.platform,
+    draft.projectName,
+  );
+  // Backward-compat: hard constraints still live at draft.constraints.technical
+  draft.constraints.technical = architecturalRequirements.constraints;
+  // Full requirements stored for downstream generators (agents.md, requirements.md)
+  draft.architecturalRequirements = architecturalRequirements;
+  console.log('[RequirementExtractor] Extracted', architecturalRequirements.functional.length, 'functional requirements,', architecturalRequirements.edgeCases.length, 'edge cases');
+  console.log('[ConstraintExtractor]', JSON.stringify(architecturalRequirements.constraints, null, 2));
 
   // This domain has precise offline architecture requirements. Resolve those
   // deterministically, then let the suggestion step offer alternatives within
@@ -354,11 +362,11 @@ Platform: ${draft.platform}
 Features mentioned: ${draft.features?.join(', ') || 'none yet'}
 
 Hard constraints already extracted:
-Forbidden tools: ${extractedConstraints.forbiddenTools.join(', ')}
-Forbidden categories: ${extractedConstraints.forbiddenCategories.join(', ')}
-Required tool types: ${extractedConstraints.requiredToolTypes.join(', ')}
-Must be offline: ${extractedConstraints.mustBeOffline}
-Must use local storage: ${extractedConstraints.mustUseLocalStorage}
+Forbidden tools: ${architecturalRequirements.constraints.forbiddenTools.join(', ')}
+Forbidden categories: ${architecturalRequirements.constraints.forbiddenCategories.join(', ')}
+Required tool types: ${architecturalRequirements.constraints.requiredToolTypes.join(', ')}
+Must be offline: ${architecturalRequirements.constraints.mustBeOffline}
+Must use local storage: ${architecturalRequirements.constraints.mustUseLocalStorage}
 
 Rules for this specific project:
 - Do NOT suggest any tool in the forbidden list

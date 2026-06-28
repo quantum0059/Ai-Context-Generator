@@ -23,6 +23,8 @@ export const projectSpecSchema = z.object({
   projectSpecVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
   projectType: z.string().optional(),
   classificationReason: z.string().optional(),
+  /** Validated upstream by requirement-extractor; passed through as-is. */
+  architecturalRequirements: z.any().optional(),
 });
 
 export const draftInputSchema = z.object({
@@ -61,6 +63,7 @@ export function finalizeProjectSpec(
     projectSpecVersion: "1.0.0",
     projectType: draft.projectType,
     classificationReason: draft.classificationReason,
+    architecturalRequirements: draft.architecturalRequirements,
   };
   const parsed = projectSpecSchema.safeParse(spec);
   if (!parsed.success) {
