@@ -16,9 +16,6 @@ export const MODELS = {
 
   // Defaults for the other supported provider gateways
   ANTHROPIC_DEFAULT: "claude-sonnet-4-20250514",
-  XAI_DEFAULT: "grok-4",
-  // NVIDIA NIM — Nemotron: 1M context, agentic reasoning + planning
-  NVIDIA_DEFAULT: "nvidia/nemotron-3-ultra-550b-a55b",
 } as const;
 
 export type AiModel = (typeof MODELS)[keyof typeof MODELS];

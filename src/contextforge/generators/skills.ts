@@ -1,7 +1,7 @@
 import { registryByName } from "../registry";
 import type { RegistryEntry } from "../registry";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
-import { lockedEntries, lowConfidenceWarning, slugify } from "./shared";
+import { buildTechCodeSnippets, lockedEntries, lowConfidenceWarning, slugify } from "./shared";
 
 /**
  * Gets platform-specific install commands from registry.
@@ -57,6 +57,7 @@ interface TechStackEntry {
 export function generateSkills(spec: ProjectSpec, _sharedContext: string = ''): PackageFiles {
   const entries: TechStackEntry[] = [];
   const markdownSections: string[] = [];
+  const allSnippets = buildTechCodeSnippets(spec);
 
   for (const [category, entry] of lockedEntries(spec)) {
     const tool = entry.value;
@@ -90,7 +91,6 @@ export function generateSkills(spec: ProjectSpec, _sharedContext: string = ''): 
     };
     entries.push(structuredEntry);
 
-    // Build markdown section
     const warn = isLowConf ? lowConfidenceWarning(tool) : "";
     const infoTable = reg
       ? `| | |
@@ -116,6 +116,10 @@ export function generateSkills(spec: ProjectSpec, _sharedContext: string = ''): 
       ? reg.skillGenerationHints
       : `No registry data available for ${tool}; consult its official documentation.`;
 
+    // Extract the specific snippet for this tool if it exists
+    const snippetMatch = allSnippets.match(new RegExp(`### ${tool} \\(${category}\\)[\\s\\S]*?(\`\`\`[a-z]*[\\s\\S]*?\`\`\`)`));
+    const snippetSection = snippetMatch ? `\n**Code Integration Pattern:**\n${snippetMatch[1]}\n` : "";
+
     markdownSections.push(
       `${warn}### ${tool} (${category})
 
@@ -127,7 +131,8 @@ ${infoTable}
 ${envSection ? envSection + "\n" : ""}
 ${practicesSection}
 
-${pitfallsSection}`,
+${pitfallsSection}
+${snippetSection}`,
     );
   }
 

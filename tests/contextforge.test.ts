@@ -232,9 +232,9 @@ describe("projectspec finalization and package assembly", () => {
       const slug = feature.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const manifest = files[`context-manifests/${slug}.json`];
       expect(manifest, `missing manifest for ${feature}`).toBeTruthy();
-      const parsed = JSON.parse(manifest) as { requiredContext: string[] };
-      expect(parsed.requiredContext).toContain("agents.md");
-      expect(parsed.requiredContext.some((p) => p.startsWith(`prompts/${slug}/`))).toBe(true);
+      const parsed = JSON.parse(manifest) as { load_before_starting: string[] };
+      expect(parsed.load_before_starting).toContain("agents.md");
+      expect(parsed.load_before_starting.some((p) => p.startsWith(`prompts/${slug}/`))).toBe(true);
     }
 
     // agents.md flags the low-confidence area

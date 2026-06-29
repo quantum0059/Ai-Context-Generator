@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { claudeJson } from "../../lib/claude";
+import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
-import { buildConstraintBlock, decisionFileName, relevantCategoriesForFeature, slugify } from "./shared";
+import { buildConstraintBlock, decisionFileName, lockedEntries, relevantCategoriesForFeature, slugify } from "./shared";
+import { registryByName } from "../registry";
 import { MODELS } from "../../lib/ai-models";
 
 function matchingUiReferences(featureSlug: string, materialFiles: PackageFiles): string[] {
@@ -144,16 +145,8 @@ export async function generateManifests(
     const manifestData = await generateFeatureManifest(spec, feature, featureIdx, uniqueContext);
 
     // JSON manifest (kept for machine consumption)
-    if (manifestData) {
-      files[`context-manifests/${featureSlug}.json`] = JSON.stringify(manifestData, null, 2) + "\n";
-    } else {
-      files[`context-manifests/${featureSlug}.json`] =
-        JSON.stringify(
-          { feature, requiredContext: uniqueContext },
-          null,
-          2,
-        ) + "\n";
-    }
+    const jsonManifest = manifestData ?? buildFallbackManifest(spec, feature, featureIdx, uniqueContext);
+    files[`context-manifests/${featureSlug}.json`] = JSON.stringify(jsonManifest, null, 2) + "\n";
 
     // Human-readable feature guide
     const contextList = uniqueContext
@@ -234,4 +227,92 @@ function describeFile(
     return "Build prompt — copy-paste into your AI assistant";
   }
   return "Supporting context file";
+}
+
+/**
+ * Derives a machine-complete manifest from the ProjectSpec without requiring
+ * an AI call. All 9 manifest fields are populated from deterministic rules.
+ * This replaces the previous stub `{ feature, requiredContext }` fallback.
+ */
+function buildFallbackManifest(
+  spec: ProjectSpec,
+  feature: string,
+  featureIdx: number,
+  requiredContext: string[],
+): Record<string, unknown> {
+  const slug = slugify(feature);
+  const relevant = relevantCategoriesForFeature(spec, feature);
+  const locked = lockedEntries(spec);
+
+  // Derive files to create from feature slug and stack
+  const isNextjs = locked.some(([, e]) => e.value.toLowerCase().includes('next'));
+  const filesToCreate: string[] = isNextjs
+    ? [`src/app/${slug}/page.tsx`, `src/components/${slug}/index.tsx`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
+    : [`src/features/${slug}/index.ts`, `src/services/${slug}.ts`, `src/types/${slug}.ts`];
+
+  // Derive acceptance criteria from feature name + stack
+  const acceptanceCriteria: string[] = [
+    `${feature} works end-to-end on ${spec.platform} without errors`,
+    `No technology outside the locked stack (${locked.map(([, e]) => e.value).join(', ')}) is imported`,
+    `TypeScript strict mode passes — no implicit \`any\` types`,
+    `Loading, error, and empty states are all handled gracefully`,
+    `All public service functions in src/services/${slug}.ts have unit tests`,
+  ];
+
+  const text = feature.toLowerCase();
+  if (/auth|login|sign/.test(text)) {
+    acceptanceCriteria.push('Unauthenticated user is redirected to /sign-in — not shown a blank or broken page');
+    acceptanceCriteria.push('Authenticated user ID is correctly propagated to all service layer calls');
+  }
+  if (/billing|payment|stripe/.test(text)) {
+    acceptanceCriteria.push('Stripe webhook signature is verified on every webhook call — handler returns 400 on invalid signature');
+    acceptanceCriteria.push('Premium access is granted only after webhook confirms payment — not at checkout redirect');
+  }
+  if (/chat|message|realtime/.test(text)) {
+    acceptanceCriteria.push('Realtime subscription is established on mount and torn down on unmount — no duplicate listeners');
+  }
+
+  // Derive required environment variables from the registry
+  const envVars: string[] = [];
+  for (const [, entry] of locked) {
+    const reg = registryByName(entry.value);
+    if (reg?.envVars) envVars.push(...reg.envVars);
+  }
+
+  // Derive test commands from stack
+  const hasVitest = locked.some(([, e]) => e.value.toLowerCase().includes('vitest'));
+  const hasJest = locked.some(([, e]) => e.value.toLowerCase().includes('jest'));
+  const testCommands = hasVitest
+    ? ['npx vitest run', `npx vitest run src/__tests__/${slug}.test.ts`]
+    : hasJest
+    ? ['npx jest', `npx jest --testPathPattern=${slug}`]
+    : [`npm test`];
+
+  // Derive common mistakes from stack
+  const commonMistakes: string[] = [
+    `Importing external SDKs directly in component files instead of src/services/${slug}.ts`,
+    'Using \`any\` type instead of the domain types in src/types/${slug}.ts',
+  ];
+  if (locked.some(([, e]) => e.value.toLowerCase().includes('supabase'))) {
+    commonMistakes.push('Querying Supabase without user_id filter — always add .eq("user_id", userId)');
+  }
+  if (locked.some(([, e]) => e.value.toLowerCase().includes('clerk'))) {
+    commonMistakes.push('Using useUser() in a Server Component — use auth() from @clerk/nextjs/server instead');
+  }
+
+  return {
+    feature,
+    version: spec.projectSpecVersion,
+    load_before_starting: requiredContext,
+    files_to_create: filesToCreate,
+    files_to_modify: [
+      'src/app/layout.tsx',
+      'src/components/navigation/Navigation.tsx',
+    ],
+    acceptance_criteria: acceptanceCriteria,
+    environment_variables_required: Array.from(new Set(envVars)),
+    test_commands: testCommands,
+    common_mistakes: commonMistakes,
+    build_after: featureIdx > 0 ? [spec.features[featureIdx - 1]] : [],
+  };
 }

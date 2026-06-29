@@ -380,22 +380,11 @@ Critical rules:
 - Every string must be specific to THIS project — no generic boilerplate
 - Return ONLY valid JSON`;
 
-  let attempts = 0;
-  let lastError: unknown;
-  while (attempts < 2) {
-    try {
-      return await claudeJson(
-        SYSTEM_PROMPT,
-        userPrompt,
-        architecturalAnalysisSchema,
-        1,
-        MODELS.CONTENT,
-      );
-    } catch (err) {
-      lastError = err;
-      console.error(`[RequirementExtractor] Attempt ${attempts + 1} failed:`, err);
-      attempts++;
-    }
-  }
-  throw lastError;
+  return await claudeJson(
+    SYSTEM_PROMPT,
+    userPrompt,
+    architecturalAnalysisSchema,
+    0,
+    MODELS.CONTENT,
+  );
 }

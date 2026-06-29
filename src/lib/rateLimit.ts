@@ -19,15 +19,15 @@ export interface RateLimitConfig {
 
 const defaultConfig: RateLimitConfig = {
   windowMs: 60 * 1000, // 1 minute
-  maxRequests: 10,
+  maxRequests: 100,
 };
 
 const endpointConfigs: Record<string, RateLimitConfig> = {
-  "/api/contextforge/discover": { windowMs: 60 * 1000, maxRequests: 10 },
-  "/api/contextforge/suggest": { windowMs: 60 * 1000, maxRequests: 20 },
-  "/api/contextforge/generate": { windowMs: 60 * 1000, maxRequests: 5 },
-  "/api/contextforge/regenerate": { windowMs: 60 * 1000, maxRequests: 5 },
-  "/api/contextforge/upload": { windowMs: 60 * 1000, maxRequests: 10 },
+  "/api/contextforge/discover":   { windowMs: 60 * 1000, maxRequests: 60 },
+  "/api/contextforge/suggest":    { windowMs: 60 * 1000, maxRequests: 120 },
+  "/api/contextforge/generate":   { windowMs: 60 * 1000, maxRequests: 30 },
+  "/api/contextforge/regenerate": { windowMs: 60 * 1000, maxRequests: 30 },
+  "/api/contextforge/upload":     { windowMs: 60 * 1000, maxRequests: 60 },
 };
 
 /**

@@ -133,18 +133,33 @@ export default function ReviewPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(spec),
       });
-      if (!res.ok) throw new Error("Package generation failed.");
+      if (!res.ok) {
+        let errMsg = "Package generation failed.";
+        try {
+          const errData = await res.json();
+          if (errData.error) errMsg = errData.error;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
       const data = (await res.json()) as { files: Record<string, string>; meta: PackageMeta };
       const zip = new JSZip();
       for (const [path, content] of Object.entries(data.files)) {
-        zip.file(`project-package/${path}`, content);
+        const isExecutable = path.endsWith(".sh");
+        zip.file(`project-package/${path}`, content, {
+          unixPermissions: isExecutable ? "755" : "644",
+        });
       }
-      const blob = await zip.generateAsync({ type: "blob" });
+      const blob = await zip.generateAsync({ 
+        type: "blob",
+        platform: "UNIX"
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `${state.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-context-package.zip`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
       setGenerated({ count: Object.keys(data.files).length, meta: data.meta });
       setLastSpec(spec);

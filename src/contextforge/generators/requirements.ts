@@ -216,6 +216,6 @@ ${c.technical?.forbiddenTools?.length ? `- 🚫 Forbidden: ${c.technical.forbidd
 
 ---
 
-*Re-run with an AI provider configured (ANTHROPIC_API_KEY / XAI_API_KEY / NVIDIA_API_KEY / GROQ_API_KEY) to get a full architectural requirement extraction.*
+*Re-run with an AI provider configured (ANTHROPIC_API_KEY / GROQ_API_KEY) to get a full architectural requirement extraction.*
 `;
 }

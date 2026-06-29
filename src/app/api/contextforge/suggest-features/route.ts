@@ -430,7 +430,7 @@ Suggest 6-12 features in total across all epics. Make every feature specific to 
       systemPrompt,
       userPrompt,
       richFeatureSetSchema,
-      1,
+      0,
       MODELS.REASONING,
     );
 

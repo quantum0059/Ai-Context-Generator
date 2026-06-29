@@ -3,6 +3,7 @@ import { claudeJson, isClaudeConfigured } from "../lib/claude";
 import { extractArchitecturalRequirements } from "./requirement-extractor";
 import type { DraftInput } from "../types/projectspec";
 import { MODELS } from "../lib/ai-models";
+import { validateRegistryCoverage } from "./registry";
 
 const discoverySchema = z.object({
   projectType: z.enum([
@@ -44,13 +45,25 @@ const KEYWORD_TRIGGERS: Array<{ keywords: string[]; category: string }> = [
   { keywords: ["video", "stream", "call", "lesson"], category: "videoProvider" },
   { keywords: ["payment", "subscription", "checkout", "billing"], category: "payments" },
   { keywords: ["email", "newsletter"], category: "email" },
-  { keywords: ["upload", "file", "image", "media"], category: "storage" },
+  { keywords: ["upload", "file", "image", "media"], category: "imageProcessing" },
   { keywords: ["analytics", "tracking", "funnel"], category: "analytics" },
   { keywords: ["monitor", "error", "crash"], category: "monitoring" },
   { keywords: ["blockchain", "wallet", "crypto", "web3"], category: "walletProvider" },
   { keywords: ["map", "geolocation", "gps"], category: "mapsProvider" },
   { keywords: ["search", "full-text"], category: "searchProvider" },
+  { keywords: ["cache", "caching", "redis", "session store"], category: "caching" },
+  { keywords: ["queue", "background job", "worker", "job scheduling"], category: "queueing" },
+  { keywords: ["realtime", "websocket", "live", "pub/sub", "multiplayer"], category: "websocket" },
+  { keywords: ["cms", "content management", "blog", "editorial"], category: "cms" },
+  { keywords: ["rate limit", "rate limiting", "throttle", "ddos"], category: "rateLimit" },
+  { keywords: ["feature flag", "a/b test", "experiment", "toggle"], category: "featureFlags" },
+  { keywords: ["log", "logging", "log aggregation", "structured logs"], category: "logging" },
+  { keywords: ["i18n", "internationalisation", "internationalization", "multilingual", "translation"], category: "i18n" },
 ];
+
+// Validate registry coverage at module load — warns if any trigger category
+// has zero registry entries (would silently fall to Tier 2 hallucination).
+validateRegistryCoverage(KEYWORD_TRIGGERS.map((t) => t.category));
 
 function hasKeyword(text: string, keyword: string): boolean {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -226,13 +239,6 @@ function offlineCodeAnalysisCategories(draft: DraftInput) {
   return categories;
 }
 
-function isOfflineCodeAnalysisProject(draft: DraftInput): boolean {
-  const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
-  return /\b(offline|runs locally|no internet)\b/.test(text)
-    && /\b(ast|abstract syntax tree|source code|code review|code analysis)\b/.test(text)
-    && /\b(mentor|algorithm|complexity|skill profile|programming)\b/.test(text);
-}
-
 /**
  * Dynamic Category Discovery (Section 3): one Claude call determines which
  * technology categories are needed - categories are NOT hardcoded. The
@@ -259,24 +265,8 @@ export async function discoverCategories(
   console.log('[RequirementExtractor] Extracted', architecturalRequirements.functional.length, 'functional requirements,', architecturalRequirements.edgeCases.length, 'edge cases');
   console.log('[ConstraintExtractor]', JSON.stringify(architecturalRequirements.constraints, null, 2));
 
-  // This domain has precise offline architecture requirements. Resolve those
-  // deterministically, then let the suggestion step offer alternatives within
-  // each relevant concern instead of inventing unrelated cloud categories.
-  if (isOfflineCodeAnalysisProject(draft)) {
-    const fullCategories = offlineCodeAnalysisCategories(draft);
-    return {
-      requiredCategories: fullCategories.map((category) => category.key),
-      fullCategories,
-      engine: "heuristic",
-      projectType: "HEADLESS_ENGINE",
-      classificationReason: "The core product is a fully offline code-analysis and adaptive-learning engine with optional local interfaces.",
-    };
-  }
-
   if (isClaudeConfigured()) {
-    let attempts = 0;
-    while (attempts < 2) {
-      try {
+    try {
         const discoverySystemPrompt = `You are a senior software architect analyzing a project description to determine its technical architecture requirements.
 
 Your job has TWO steps and you must complete them in order:
@@ -376,12 +366,16 @@ Rules for this specific project:
 - If mustUseLocalStorage is true, do not suggest any cloud database
 - After listing standard categories, scan for specialized technical needs that require a custom category (e.g. AST parsing → astParser, PDF generation → pdfEngine)`;
 
+        // REASONING model: category discovery is the most consequential step.
+        // A misclassification (e.g. HEADLESS_ENGINE tagged as UI_APPLICATION)
+        // silently corrupts every downstream suggestion. Use the strongest
+        // available model — throughput is irrelevant here, correctness is.
         const result = await claudeJson(
           discoverySystemPrompt,
           discoveryUserPrompt,
           discoverySchema,
           0,
-          MODELS.FAST,
+          MODELS.REASONING,
         );
         
         console.log('[CategoryDiscovery]', result.projectType, '—', result.classificationReason);
@@ -395,10 +389,7 @@ Rules for this specific project:
         };
       } catch (err) {
         console.error("[DiscoverCategories Error]", err);
-        attempts++;
-        if (attempts >= 2) break;
       }
-    }
   }
   const projectType = heuristicProjectType(draft);
   const requiredCategories = heuristicCategories(draft, projectType);

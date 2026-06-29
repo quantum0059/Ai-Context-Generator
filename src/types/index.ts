@@ -23,7 +23,25 @@ export type Category =
   | "dataFetching"
   | "speechRecognition"
   | "textToSpeech"
-  | "notifications";
+  | "notifications"
+  // Phase 3 — Production registry expansion
+  | "caching"
+  | "queueing"
+  | "websocket"
+  | "cms"
+  | "searchProvider"
+  | "imageProcessing"
+  | "i18n"
+  | "featureFlags"
+  | "logging"
+  | "walletProvider"
+  | "mapsProvider"
+  | "rateLimit"
+  | "orm"
+  | "testing"
+  | "bundler"
+  | "runtime"
+  | "forms";
 
 export type Budget = "free-only" | "low" | "flexible";
 

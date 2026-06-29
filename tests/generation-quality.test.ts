@@ -65,10 +65,11 @@ describe("prompt quality guard", () => {
     expect(isPromptContentValid(valid, "AST Parser", "concept-detection")).toBe(true);
   });
 
-  it("emits an honest failure notice instead of synthetic code when AI is unavailable", async () => {
+  it("emits a rich static fallback prompt when AI is unavailable", async () => {
     const files = await generatePrompts(spec);
     const prompt = files["prompts/ast-parser/concept-detection.md"];
-    expect(prompt).toContain("GENERATION FAILED");
+    expect(prompt).toContain("Required File Structure");
+    expect(prompt).toContain("Acceptance Criteria");
     expect(prompt).not.toContain("expect(true).toBe(true)");
     expect(prompt).not.toContain("export default function feature");
   });

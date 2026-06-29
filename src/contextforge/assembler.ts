@@ -29,6 +29,8 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
     "${" + "contextList}",
     "# TODO: install",
   ];
+  const qualityFailures: string[] = [];
+
   for (const [path, content] of Object.entries(files)) {
     if (content.includes("[PLACEHOLDER]")) {
       throw new Error(`Generic content violation: ${path} contains a placeholder token`);
@@ -37,9 +39,47 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
     if (forbidden) {
       throw new Error(`Generic content violation: ${path} contains forbidden stub content: ${forbidden}`);
     }
+
+    // Enhanced: prompt files must contain src/ paths AND at least one code block
+    if (path.startsWith("prompts/") && path.endsWith(".md")) {
+      if (!content.includes("src/")) {
+        qualityFailures.push(`${path}: missing src/ file paths — AI agent cannot determine where to create files`);
+      }
+      if (!content.includes("\`\`\`")) {
+        qualityFailures.push(`${path}: missing code block — AI agent will hallucinate API patterns`);
+      }
+    }
+
+    // Enhanced: agents.md must contain at least one code block
+    if (path === "agents.md" && !content.includes("\`\`\`")) {
+      qualityFailures.push(`agents.md: no code blocks found — AI agents read this first and need real patterns`);
+    }
+
+    // Enhanced: manifest JSON must have acceptance_criteria
+    if (path.startsWith("context-manifests/") && path.endsWith(".json")) {
+      try {
+        const parsed = JSON.parse(content) as Record<string, unknown>;
+        const ac = parsed["acceptance_criteria"] ?? parsed["acceptanceCriteria"];
+        if (!Array.isArray(ac) || (ac as unknown[]).length < 3) {
+          qualityFailures.push(`${path}: acceptance_criteria is missing or has fewer than 3 items — AI agent has no success definition`);
+        }
+      } catch {
+        qualityFailures.push(`${path}: invalid JSON — manifest cannot be parsed by AI tooling`);
+      }
+    }
   }
+
   if (!files["agents.md"]?.includes(spec.projectName)) {
     throw new Error("Generic content violation: agents.md does not reference the project name");
+  }
+
+  // Report quality failures as warnings (not exceptions) — allows demo without AI key
+  if (qualityFailures.length > 0) {
+    console.warn(
+      `[QualityGate] ${qualityFailures.length} prompt quality issue(s) detected:\n`
+      + qualityFailures.map((f) => `  ⚠️  ${f}`).join("\n")
+      + "\n  → Configure an AI provider (ANTHROPIC_API_KEY or GROQ_API_KEY) for full-quality output."
+    );
   }
 }
 

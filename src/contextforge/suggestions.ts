@@ -7,13 +7,6 @@ import { MODELS } from "../lib/ai-models";
 
 const SUGGESTION_TTL_MS = 6 * 60 * 60 * 1000; // several hours
 
-const tier1Schema = z.object({
-  candidates: z
-    .array(z.object({ name: z.string().min(1), rationale: z.string().min(1) }))
-    .min(1)
-    .max(3),
-});
-
 const tier2Schema = z.object({
   candidates: z
     .array(
@@ -32,6 +25,106 @@ export interface SuggestionResult {
   category: string;
   tier: "registry" | "community";
   candidates: SuggestionCandidate[];
+}
+
+/**
+ * Cross-category affinity rules.
+ *
+ * When `ifCategoryHas` is in the locked stack, `preferInCategory` should
+ * boost (or outright select) `preferTool` in the suggestion results.
+ * This ensures coherent stacks — e.g. if Supabase is already chosen for the
+ * database, its integrated auth should be preferred over a separate Clerk.
+ */
+interface AffinityRule {
+  /** Partial, case-insensitive match against the value in the locked stack */
+  ifCategoryHas: { category: string; toolPartial: string };
+  /** Category being suggested right now */
+  preferInCategory: string;
+  /** Tool name to bubble to position #1 if present in results */
+  preferTool: string;
+}
+
+const AFFINITY_RULES: AffinityRule[] = [
+  // Supabase DB → prefer Supabase Auth and Supabase Storage
+  {
+    ifCategoryHas: { category: "database", toolPartial: "supabase" },
+    preferInCategory: "authentication",
+    preferTool: "Supabase Auth",
+  },
+  {
+    ifCategoryHas: { category: "database", toolPartial: "supabase" },
+    preferInCategory: "storage",
+    preferTool: "Supabase Storage",
+  },
+  // Drizzle ORM → prefer PostgreSQL or Neon (Drizzle doesn't support MongoDB well)
+  {
+    ifCategoryHas: { category: "orm", toolPartial: "drizzle" },
+    preferInCategory: "database",
+    preferTool: "Neon",
+  },
+  // Upstash Redis (caching) → prefer Upstash Rate Limit (same account, zero extra setup)
+  {
+    ifCategoryHas: { category: "caching", toolPartial: "upstash" },
+    preferInCategory: "rateLimit",
+    preferTool: "Upstash Rate Limit",
+  },
+  // BullMQ (queueing) → prefer Redis (self-hosted) for caching (already needed for BullMQ)
+  {
+    ifCategoryHas: { category: "queueing", toolPartial: "bullmq" },
+    preferInCategory: "caching",
+    preferTool: "Redis (self-hosted)",
+  },
+  // Expo (mobile framework) → prefer Expo Notifications over web push
+  {
+    ifCategoryHas: { category: "framework", toolPartial: "expo" },
+    preferInCategory: "notifications",
+    preferTool: "Expo Notifications",
+  },
+  // Wagmi (wallet) → prefer RainbowKit (built on Wagmi) for wallet UI
+  {
+    ifCategoryHas: { category: "walletProvider", toolPartial: "wagmi" },
+    preferInCategory: "walletProvider",
+    preferTool: "RainbowKit",
+  },
+];
+
+/**
+ * Applies affinity rules to re-order candidates so contextually coherent
+ * tools bubble to the top. Does not remove any candidates.
+ */
+function applyAffinityRules(
+  category: string,
+  candidates: SuggestionCandidate[],
+  draft: DraftInput,
+): SuggestionCandidate[] {
+  const stack = draft.constraints as unknown as Record<string, unknown>;
+  // Also look inside draft.architecturalRequirements if available
+  const lockedStack: Record<string, string> = {};
+
+  // Try to read already-locked stack values from the draft
+  // (DraftInput doesn't carry .stack, but callers may enrich it)
+  const anyDraft = draft as unknown as Record<string, unknown>;
+  if (anyDraft.stack && typeof anyDraft.stack === "object") {
+    for (const [cat, entry] of Object.entries(anyDraft.stack as Record<string, { value?: string }>)) {
+      if (entry?.value) lockedStack[cat] = entry.value.toLowerCase();
+    }
+  }
+
+  for (const rule of AFFINITY_RULES) {
+    if (rule.preferInCategory !== category) continue;
+    const lockedValue = lockedStack[rule.ifCategoryHas.category] ?? "";
+    if (!lockedValue.includes(rule.ifCategoryHas.toolPartial.toLowerCase())) continue;
+
+    // Move the preferred tool to position 0 if it's present in candidates
+    const idx = candidates.findIndex(
+      (c) => c.name.toLowerCase().includes(rule.preferTool.toLowerCase()),
+    );
+    if (idx > 0) {
+      const [preferred] = candidates.splice(idx, 1);
+      candidates.unshift(preferred);
+    }
+  }
+  return candidates;
 }
 
 /**
@@ -142,7 +235,9 @@ export async function suggestForCategory(
   const cached = cacheGet<SuggestionResult>(cacheKey);
   if (cached) return cached;
 
-  const entries = registryFor(category);
+  // Pass the platform into registryFor so framework entries are pre-filtered
+  // to only those that support this project's target platform.
+  const entries = registryFor(category, draft.platform);
   const tc = draft.constraints.technical ?? {
     forbiddenTools: [],
     forbiddenCategories: [],
@@ -163,72 +258,16 @@ export async function suggestForCategory(
 
   let result: SuggestionResult;
 
-  if (eligibleTools.length > 0) {
-    // ── Tier 1: LLM-first reasoning over the full eligible registry ──────────
-    // We deliberately pass ALL eligible tools, not a pre-scored shortlist.
-    // Pre-scoring with string heuristics produced hardcoded biases (e.g. always
-    // Next.js for web, always Fastify for backend). The LLM reasons better.
-    let ranked = eligibleTools.slice(0, 3).map((e) => ({
-      name: e.name,
-      rationale: `${e.skillGenerationHints} Pros: ${e.pros.join("; ")}.`,
-    }));
-
-    if (isClaudeConfigured()) {
-      try {
-        const contextBlock = buildContextBlock(category, draft);
-        const toolsBlock = formatToolsForLlm(eligibleTools);
-        const r = await claudeJson(
-          "You are a Principal Engineer selecting the best-fit technologies for a software project. " +
-            "You evaluate tools based on the project's actual requirements, constraints, and non-functional needs — " +
-            "not by popularity alone. You consider offline requirements, compliance, budget, and team fit. " +
-            "You MUST only recommend tools from the provided candidate list. Return JSON only.",
-          `## Project Context\n${contextBlock}\n\n` +
-            `## Candidate Tools for "${category}"\n${toolsBlock}\n\n` +
-            `Select the best 2–3 tools from the candidates above for this specific project.\n` +
-            `For each tool, give a concise rationale (1–2 sentences) that references the project's actual requirements.\n` +
-            `Return JSON: {"candidates":[{"name":"...","rationale":"..."}]}`,
-          tier1Schema,
-          2,
-          MODELS.CONTENT,
-        );
-        const valid = r.candidates.filter((c) =>
-          eligibleTools.some((e) => e.name.toLowerCase() === c.name.toLowerCase()),
-        );
-        if (valid.length > 0) ranked = valid;
-      } catch (err) {
-        // Log the failure so it's visible in server logs; fall back to registry order
-        console.warn(
-          `[Suggestions] Tier 1 AI call failed for category "${category}" — using registry-order fallback.`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-
-    result = {
-      category,
-      tier: "registry",
-      candidates: ranked.map((c) => {
-        const entry = eligibleTools.find((e) => e.name.toLowerCase() === c.name.toLowerCase());
-        return {
-          name: entry?.name ?? c.name,
-          rationale: c.rationale,
-          docsUrl: entry?.docsUrl,
-          pricing: entry?.pricing,
-          freeTier: entry?.freeTier,
-          source: "suggested" as const,
-          confidence: "high" as const,
-        };
-      }),
-    };
-  } else if (isClaudeConfigured()) {
-    // ── Tier 2: Community suggestions from LLM training knowledge ────────────
+  if (isClaudeConfigured()) {
     try {
       const contextBlock = buildContextBlock(category, draft);
+      const toolsBlock = eligibleTools.length > 0 ? `\n\n## Known Registry Tools for Context\n${formatToolsForLlm(eligibleTools)}` : "";
 
       const prompt =
-        `## Project Context\n${contextBlock}\n\n` +
+        `## Project Context\n${contextBlock}${toolsBlock}\n\n` +
         `Suggest 2–3 real, currently-maintained tools for the "${category}" category.\n` +
         `Rules:\n` +
+        `- You may select from the Known Registry Tools, or suggest any other tool you believe is better suited.\n` +
         `- Only suggest tools that genuinely exist on npm (or the relevant package registry).\n` +
         `- Set confidence to "high" ONLY if you are certain the package exists, is actively maintained, ` +
         `and has a public GitHub repo with recent commits. Otherwise use "low".\n` +
@@ -244,30 +283,72 @@ export async function suggestForCategory(
         2,
         MODELS.CONTENT,
       );
+
+      let candidates: SuggestionCandidate[] = r.candidates.map((c) => {
+        const entry = eligibleTools.find((e) => e.name.toLowerCase() === c.name.toLowerCase());
+        return {
+          name: entry?.name ?? c.name,
+          rationale: c.rationale,
+          docsUrl: entry?.docsUrl ?? c.docsUrl,
+          pricing: entry?.pricing,
+          freeTier: entry?.freeTier,
+          source: (entry ? "suggested" : "community") as "suggested" | "community",
+          confidence: (c.confidence ?? "low") as "high" | "low",
+        };
+      });
+
+      candidates = applyAffinityRules(category, candidates, draft);
+
       result = {
         category,
-        tier: "community",
-        candidates: r.candidates.map((c) => ({
-          name: c.name,
-          rationale: c.rationale,
-          docsUrl: c.docsUrl,
-          source: "community" as const,
-          confidence: c.confidence ?? "low",
-        })),
+        tier: eligibleTools.length > 0 ? "registry" : "community",
+        candidates,
       };
     } catch (err) {
       console.warn(
-        `[Suggestions] Tier 2 AI call failed for category "${category}".`,
+        `[Suggestions] AI call failed for category "${category}" — using fallback.`,
         err instanceof Error ? err.message : err,
       );
-      result = offlineCommunityFallback(category);
+      result = buildFallbackResult(category, eligibleTools);
     }
   } else {
-    result = offlineCommunityFallback(category);
+    result = buildFallbackResult(category, eligibleTools);
   }
 
   cacheSet(cacheKey, result, SUGGESTION_TTL_MS);
   return result;
+}
+
+/**
+ * Deterministic fallback used when the AI engine is unavailable or errors.
+ *
+ * Confidence is set to "low" because entries are selected by registry priority,
+ * NOT by contextual reasoning — so the downstream skill files will emit a
+ * "verify-against-docs" warning rather than treating these as verified picks.
+ */
+function buildFallbackResult(
+  category: string,
+  eligibleTools: ReturnType<typeof registryFor>,
+): SuggestionResult {
+  if (eligibleTools.length > 0) {
+    return {
+      category,
+      tier: "registry",
+      candidates: eligibleTools.slice(0, 3).map((e) => ({
+        name: e.name,
+        rationale:
+          `${e.skillGenerationHints} Pros: ${e.pros.join("; ")}. ` +
+          `⚠️ This suggestion is based on platform defaults — no contextual analysis was performed. Verify this choice fits your specific requirements.`,
+        docsUrl: e.docsUrl,
+        pricing: e.pricing,
+        freeTier: e.freeTier,
+        source: "suggested" as const,
+        // LOW confidence: not reasoned from context, just sorted by priority
+        confidence: "low" as const,
+      })),
+    };
+  }
+  return offlineCommunityFallback(category);
 }
 
 function offlineCommunityFallback(category: string): SuggestionResult {

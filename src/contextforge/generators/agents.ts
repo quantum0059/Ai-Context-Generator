@@ -2,7 +2,7 @@ import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 import type { ProjectSpec, ArchitecturalRequirements } from "../../types/projectspec";
-import { buildConstraintBlock, decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
+import { buildConstraintBlock, buildTechCodeSnippets, buildSharedDatabaseSchema, decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
 
 /** Formats ArchitecturalRequirements into a compact context block for AI prompts */
 function buildRequirementsBlock(req: ArchitecturalRequirements): string {
@@ -169,24 +169,47 @@ List any stack choices marked confidence: 'low' and tell the AI to verify their 
 function fallbackAgents(spec: ProjectSpec): string {
   const locked = lockedEntries(spec);
   const lowConf = lowConfidenceEntries(spec);
+  const snippets = buildTechCodeSnippets(spec);
+  const schema = buildSharedDatabaseSchema(spec);
 
   const stackList = locked
     .map(([category, entry]) => `- **${category}:** ${entry.value} _(source: ${entry.source}${entry.confidence ? `, confidence: ${entry.confidence}` : ""})_`)
     .join("\n");
 
-  const archRules = locked
-    .map(([category, entry]) => `- All ${category} concerns go through **${entry.value}** exclusively; see \`${decisionFileName(spec, category)}\` for why it was chosen.`)
-    .join("\n");
+  // Per-technology architecture rules with specifics
+  const archRules = locked.map(([category, entry]) => {
+    const tool = entry.value;
+    const toolLow = tool.toLowerCase();
+    let rules = '';
+    if (toolLow.includes('next')) {
+      rules = `- All ${category} pages are **Server Components by default**. Add \`'use client'\` only when the file uses React hooks, browser APIs, or event handlers.\n- Fetch data in Server Components, pass as props to Client Components.\n- All API routes live in \`src/app/api/\` as \`route.ts\` files.`;
+    } else if (toolLow.includes('clerk')) {
+      rules = `- Use \`auth()\` from \`@clerk/nextjs/server\` in API routes and Server Components.\n- Use \`clerkMiddleware()\` in \`src/middleware.ts\` for route protection.\n- NEVER use \`useUser()\` outside Client Components.`;
+    } else if (toolLow.includes('supabase')) {
+      rules = `- All Supabase queries MUST include a \`.eq('user_id', userId)\` filter — RLS is enabled on all tables.\n- Import Supabase only in \`src/services/\` or \`src/lib/supabase/\` — never in components or routes.\n- Realtime subscriptions must call \`supabase.removeChannel()\` in the cleanup function.`;
+    } else if (toolLow.includes('stripe')) {
+      rules = `- Checkout sessions are created in \`src/app/api/billing/checkout/route.ts\`.\n- Stripe webhook handler lives at \`src/app/api/webhooks/stripe/route.ts\` and MUST verify signatures with \`stripe.webhooks.constructEvent()\`.\n- Never grant access at the checkout redirect — wait for the webhook.`;
+    } else if (toolLow.includes('prisma')) {
+      rules = `- Import \`prisma\` only from \`src/lib/prisma.ts\` singleton — never create \`new PrismaClient()\` in a request handler.\n- Use \`prisma.$transaction()\` for multi-table writes.`;
+    } else if (toolLow.includes('zustand')) {
+      rules = `- Stores live in \`src/stores/<domain>Store.ts\`. One store per domain.\n- Define all mutations inside the store definition — never call \`set()\` from outside.\n- UI state (filters, selections) goes in stores; server data goes through the service layer.`;
+    } else if (toolLow.includes('better-sqlite3')) {
+      rules = `- \`better-sqlite3\` is SYNCHRONOUS — do not use \`async/await\`.\n- Cache prepared statements at module level. Never prepare inside a loop.\n- Enable WAL mode and foreign keys on startup.`;
+    } else {
+      rules = `- All ${category} concerns go through **${tool}** exclusively.\n- See \`${decisionFileName(spec, category)}\` for integration patterns.`;
+    }
+    return `### ${tool} (${category})\n${rules}`;
+  }).join('\n\n');
 
   const lowConfSection = lowConf.length
     ? lowConf
-        .map(([category, entry]) => `- **${category}: ${entry.value}** - community-suggested with low confidence. Verify current APIs and conventions against official docs before relying on them.`)
+        .map(([category, entry]) => `- **${category}: ${entry.value}** — community-suggested with low confidence. Verify current APIs and conventions against official docs before relying on them.`)
         .join("\n")
     : "_None. All locked stack entries are high confidence._";
 
   const constraintBlock = buildConstraintBlock(spec);
 
-  return `# ${spec.projectName} - AI Development Constitution
+  return `# ${spec.projectName} — AI Development Constitution
 ${constraintBlock}
 
 ## Project Overview
@@ -197,25 +220,36 @@ ${spec.description}
 ${spec.constraints.budget ? `- **Budget constraint:** ${spec.constraints.budget}` : ""}
 ${spec.constraints.avoid?.length ? `- **Explicitly avoided:** ${spec.constraints.avoid.join(", ")}` : ""}
 
-## Tech Stack (LOCKED - projectSpecVersion: ${spec.projectSpecVersion})
+## Tech Stack (LOCKED — Do Not Change — projectSpecVersion: ${spec.projectSpecVersion})
 ${stackList || "_No technologies locked._"}
 
 Categories marked "not needed" by the user: ${
-    Object.entries(spec.stack)
-      .filter(([, e]) => e.value === null)
-      .map(([c]) => c)
-      .join(", ") || "none"
-  }
+  Object.entries(spec.stack)
+    .filter(([, e]) => e.value === null)
+    .map(([c]) => c)
+    .join(", ") || "none"
+}
 
 ## Architecture Rules
-${archRules || "_No locked stack entries._"}
-- External SDK calls live only in the service layer; components never import SDKs directly.
-- Validate all external input at the boundary before it reaches business logic.
 
-## Coding Conventions
-- Write idiomatic code for the locked frameworks above - follow their official style guides.
-- TypeScript/typed code where the stack supports it; explicit error handling everywhere.
-- Small, single-responsibility modules; one component per file.
+${archRules || "_No locked stack entries._"}
+
+### Universal Rules
+- External SDK calls live ONLY in the service layer (\`src/services/\`); components and routes never import SDKs directly.
+- Validate all external input at the boundary with Zod before it reaches business logic.
+- Every async operation must handle loading, success, and error states.
+${snippets}
+${schema}
+
+## File & Folder Conventions
+
+- **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, one component per file
+- **Pages:** \`src/app/<route>/page.tsx\` (Next.js) or \`src/pages/<route>.tsx\`
+- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
+- **Stores:** \`src/stores/<domain>Store.ts\` — one store per domain
+- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
+- **API Routes:** \`src/app/api/<resource>/route.ts\`
+- **Tests:** \`src/__tests__/<module>.test.ts\` or co-located \`__tests__/\`
 
 ## What NOT to do
 - Do NOT introduce technologies outside the LOCKED stack above.
@@ -225,6 +259,14 @@ ${spec.constraints.avoid?.length ? `- Do NOT use: ${spec.constraints.avoid.join(
 
 ## Low-Confidence Areas
 ${lowConfSection}
+
+## Load Order for AI Sessions
+
+1. \`agents.md\` — this file (always first)
+2. \`tech-stack.md\` — technology reference
+3. \`requirements.md\` — formal requirement document
+4. Feature-specific files from \`context-manifests/<feature>-guide.md\`
+5. Build prompts from \`prompts/<feature>/\`
 
 ## When stuck
 - \`tech-stack.md\` for complete technology reference, setup details, and best practices.

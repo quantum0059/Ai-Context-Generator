@@ -23,9 +23,18 @@ import { MODELS, type AiModel } from "./ai-models";
 
 const FAST_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? 15_000);
 const CONTENT_REQUEST_TIMEOUT_MS = Number(process.env.AI_CONTENT_REQUEST_TIMEOUT_MS ?? 90_000);
+const GROQ_DEFAULT_MODEL = (process.env.GROQ_MODEL as AiModel | undefined) ?? MODELS.CONTENT;
+const GROQ_REASONING_MODEL =
+  (process.env.GROQ_REASONING_MODEL as AiModel | undefined) ?? GROQ_DEFAULT_MODEL;
 
 function requestTimeout(model: AiModel): number {
   return model === MODELS.FAST ? FAST_REQUEST_TIMEOUT_MS : CONTENT_REQUEST_TIMEOUT_MS;
+}
+
+function resolveGroqModel(model: AiModel): AiModel {
+  if (model === MODELS.CONTENT) return GROQ_DEFAULT_MODEL;
+  if (model === MODELS.REASONING) return GROQ_REASONING_MODEL;
+  return model;
 }
 
 export async function groqJson<T>(
@@ -38,10 +47,14 @@ export async function groqJson<T>(
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
   let lastError: unknown;
-  let activeModel: AiModel = model;
+  let activeModel: AiModel = resolveGroqModel(model);
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      if (activeModel === MODELS.CONTENT || activeModel === MODELS.CONTENT_FALLBACK) {
+      if (
+        activeModel === GROQ_DEFAULT_MODEL ||
+        activeModel === MODELS.CONTENT_FALLBACK ||
+        activeModel === MODELS.FAST
+      ) {
         console.log(`[Generator] Using model: ${activeModel}`);
       }
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -65,8 +78,8 @@ export async function groqJson<T>(
         }),
       });
       if (!res.ok) {
-        if (res.status === 429 && activeModel === MODELS.CONTENT) {
-          console.warn(`[Generator] ${MODELS.CONTENT} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
+        if (res.status === 429 && activeModel === GROQ_DEFAULT_MODEL && activeModel !== MODELS.CONTENT_FALLBACK) {
+          console.warn(`[Generator] ${GROQ_DEFAULT_MODEL} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
           return groqJson(systemPrompt, userPrompt, schema, 0, MODELS.CONTENT_FALLBACK);
         }
         throw new Error(`Groq API error: ${res.status}`);
@@ -94,10 +107,14 @@ export async function groqText(
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
   let lastError: unknown;
-  let activeModel: AiModel = model;
+  let activeModel: AiModel = resolveGroqModel(model);
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      if (activeModel === MODELS.CONTENT || activeModel === MODELS.CONTENT_FALLBACK) {
+      if (
+        activeModel === GROQ_DEFAULT_MODEL ||
+        activeModel === MODELS.CONTENT_FALLBACK ||
+        activeModel === MODELS.FAST
+      ) {
         console.log(`[Generator] Using model: ${activeModel}`);
       }
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -117,8 +134,8 @@ export async function groqText(
         }),
       });
       if (!res.ok) {
-        if (res.status === 429 && activeModel === MODELS.CONTENT) {
-          console.warn(`[Generator] ${MODELS.CONTENT} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
+        if (res.status === 429 && activeModel === GROQ_DEFAULT_MODEL && activeModel !== MODELS.CONTENT_FALLBACK) {
+          console.warn(`[Generator] ${GROQ_DEFAULT_MODEL} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
           return groqText(systemPrompt, userPrompt, 0, MODELS.CONTENT_FALLBACK);
         }
         throw new Error(`Groq API error: ${res.status}`);

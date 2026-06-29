@@ -1,7 +1,5 @@
 import { z } from "zod";
 import { groqJson, groqText, isGroqConfigured } from "./groq";
-import { xaiJson, xaiText, isXaiConfigured } from "./xai";
-import { nvidiaJson, nvidiaText, isNvidiaConfigured } from "./nvidia";
 import { MODELS, type AiModel } from "./ai-models";
 
 /**
@@ -9,10 +7,8 @@ import { MODELS, type AiModel } from "./ai-models";
  *
  * Priority order:
  *   1. Anthropic Claude  (ANTHROPIC_API_KEY)
- *   2. xAI / Grok        (XAI_API_KEY)
- *   3. NVIDIA Nemotron   (NVIDIA_API_KEY)  ← primary fallback
- *   4. Groq              (GROQ_API_KEY)    ← last-resort fallback
- *   5. No AI — callers fall back to deterministic heuristics
+ *   2. Groq              (GROQ_API_KEY)    ← fallback
+ *   3. No AI — callers fall back to deterministic heuristics
  *
  * All callers import `isClaudeConfigured` and `claudeJson` from this file.
  * The function names are kept for backward compatibility — they dispatch to
@@ -27,8 +23,6 @@ import { MODELS, type AiModel } from "./ai-models";
 export function isClaudeConfigured(): boolean {
   return (
     Boolean(process.env.ANTHROPIC_API_KEY) ||
-    isXaiConfigured() ||
-    isNvidiaConfigured() ||
     isGroqConfigured()
   );
 }
@@ -133,7 +127,7 @@ async function callClaudeText(
 
 /**
  * Sends a prompt to the configured AI provider and validates the response
- * against the given Zod schema. Tries Claude first, then xAI, then Groq.
+ * against the given Zod schema. Tries Claude first, then Groq.
  *
  * All callers import this as `claudeJson` for backward compatibility.
  */
@@ -148,20 +142,12 @@ export async function claudeJson<T>(
   if (process.env.ANTHROPIC_API_KEY) {
     return callClaude(systemPrompt, userPrompt, schema, retries);
   }
-  // Try xAI
-  if (isXaiConfigured()) {
-    return xaiJson(systemPrompt, userPrompt, schema, retries);
-  }
-  // Fallback to NVIDIA Nemotron (primary fallback)
-  if (isNvidiaConfigured()) {
-    return nvidiaJson(systemPrompt, userPrompt, schema, retries, model);
-  }
-  // Last-resort fallback to Groq
+  // Fallback to Groq
   if (isGroqConfigured()) {
     return groqJson(systemPrompt, userPrompt, schema, retries, model);
   }
   throw new Error(
-    "No AI provider configured. Set ANTHROPIC_API_KEY, XAI_API_KEY, NVIDIA_API_KEY, or GROQ_API_KEY.",
+    "No AI provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.",
   );
 }
 
@@ -178,19 +164,11 @@ export async function claudeText(
   if (process.env.ANTHROPIC_API_KEY) {
     return callClaudeText(systemPrompt, userPrompt, retries);
   }
-  // Try xAI
-  if (isXaiConfigured()) {
-    return xaiText(systemPrompt, userPrompt, retries);
-  }
-  // Fallback to NVIDIA Nemotron (primary fallback)
-  if (isNvidiaConfigured()) {
-    return nvidiaText(systemPrompt, userPrompt, retries, model);
-  }
-  // Last-resort fallback to Groq
+  // Fallback to Groq
   if (isGroqConfigured()) {
     return groqText(systemPrompt, userPrompt, retries, model);
   }
   throw new Error(
-    "No AI provider configured. Set ANTHROPIC_API_KEY, XAI_API_KEY, NVIDIA_API_KEY, or GROQ_API_KEY.",
+    "No AI provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.",
   );
 }

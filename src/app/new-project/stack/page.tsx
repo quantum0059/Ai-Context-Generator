@@ -179,27 +179,23 @@ export default function StackPage() {
           if (category.isCustom && discoveredOptions.length > 0) {
             return [category.key, discoveredOptions] as const;
           }
-          try {
-            const response = await fetch("/api/contextforge/suggest", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ category: category.key, draft }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error ?? "Recommendation failed");
-            const apiOptions = (data.candidates as SuggestionCandidate[]).map((candidate) => ({
-              name: candidate.name,
-              rationale: candidate.rationale,
-              source: candidate.source,
-              confidence: candidate.confidence,
-            }));
-            const primaryOptions = category.isCustom ? discoveredOptions : apiOptions;
-            const alternativeOptions = category.isCustom ? apiOptions : discoveredOptions;
-            const names = new Set(primaryOptions.map((option) => option.name.toLowerCase()));
-            return [category.key, [...primaryOptions, ...alternativeOptions.filter((option) => !names.has(option.name.toLowerCase()))]] as const;
-          } catch {
-            return [category.key, discoveredOptions] as const;
-          }
+          const response = await fetch("/api/contextforge/suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category: category.key, draft }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ? JSON.stringify(data.error) : "Recommendation failed");
+          const apiOptions = (data.candidates as SuggestionCandidate[]).map((candidate) => ({
+            name: candidate.name,
+            rationale: candidate.rationale,
+            source: candidate.source,
+            confidence: candidate.confidence,
+          }));
+          const primaryOptions = category.isCustom ? discoveredOptions : apiOptions;
+          const alternativeOptions = category.isCustom ? apiOptions : discoveredOptions;
+          const names = new Set(primaryOptions.map((option) => option.name.toLowerCase()));
+          return [category.key, [...primaryOptions, ...alternativeOptions.filter((option) => !names.has(option.name.toLowerCase()))]] as const;
         }));
 
         if (cancelled) return;

@@ -178,6 +178,7 @@ export default function FeaturesPage() {
   const [error, setError] = useState<string | null>(null);
   const [customInput, setCustomInput] = useState("");
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [engineWarning, setEngineWarning] = useState<string | null>(null);
   const [engine, setEngine] = useState<string>("");
 
   useEffect(() => {
@@ -240,6 +241,7 @@ export default function FeaturesPage() {
         }
         setRichSet(data);
         setEngine(data.engine);
+        setEngineWarning(data.engine === "heuristic" ? data.error ?? null : null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
       } finally {
@@ -352,6 +354,15 @@ export default function FeaturesPage() {
               >
                 Retry
               </Button>
+            </div>
+          )}
+
+          {engineWarning && !loading && !error && (
+            <div className="mb-4 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-4">
+              <p className="text-sm text-yellow-300">
+                AI feature extraction failed, so these suggestions came from the heuristic fallback.
+              </p>
+              <p className="mt-1 text-xs text-yellow-200/80">{engineWarning}</p>
             </div>
           )}
 

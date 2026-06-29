@@ -1,6 +1,7 @@
 import type { ConflictItem, ConflictReport, ProjectSpec } from "../types/projectspec";
 
 const CLOUD_TOOLS = [
+  // Original
   "supabase",
   "firebase",
   "vercel",
@@ -12,6 +13,24 @@ const CLOUD_TOOLS = [
   "groq",
   "stream video",
   "cloudinary",
+  // New registry entries that require internet
+  "ably",
+  "pusher channels",
+  "partykit",
+  "algolia",
+  "typesense cloud",
+  "inngest",
+  "trigger.dev",
+  "axiom",
+  "logtail",
+  "upstash redis",
+  "upstash rate limit",
+  "uploadthing",
+  "sanity",
+  "contentful",
+  "statsig",
+  "launchdarkly",
+  "privy",
 ];
 
 function selectedEntries(spec: ProjectSpec) {
