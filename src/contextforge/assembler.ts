@@ -20,6 +20,7 @@ import { generateMcpToolDefinition } from "./generators/mcp-tool";
 import { buildSharedContext } from "./generators/shared";
 import { validateGeneratedPackage, type ValidationResult } from "./validators/stack-validator";
 import { generateRequirementsDoc } from "./generators/requirements";
+import { isClaudeConfigured } from "../lib/claude";
 
 /** No Generic Content rule (Section 14). */
 function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
@@ -213,7 +214,8 @@ export async function assemblePackage(
 
   // Write a validation report into the package itself
   // so the user knows what was flagged
-  files['validation-report.md'] = generateValidationReport(validation);
+  const aiEnabled = isClaudeConfigured();
+  files['validation-report.md'] = generateValidationReport(validation, aiEnabled);
 
   console.log("[Generator] 100% complete — Package generation finished.");
   const elapsed = Date.now() - startTime;
@@ -227,15 +229,25 @@ export async function assemblePackage(
 }
 
 function generateValidationReport(
-  result: ValidationResult
+  result: ValidationResult,
+  aiEnabled = true,
 ): string {
+  const modeBanner = aiEnabled
+    ? `**Generation mode:** AI-assisted (full quality).\n\n`
+    : `> ⚠️ **Generation mode: HEURISTIC (draft quality).** No AI provider was \n`
+      + `> configured, so requirements, prompts, and skills were produced from \n`
+      + `> deterministic keyword rules rather than contextual reasoning. This \n`
+      + `> package is suitable for previewing structure only. **Regenerate with \n`
+      + `> ANTHROPIC_API_KEY (or GROQ_API_KEY) set before handing it to an AI agent.**\n\n`;
+
   if (result.passed && result.warnings.length === 0) {
     return `# Validation Report\n\n` +
+      modeBanner +
       `✅ All checks passed. ` +
       `No constraint violations found.`;
   }
 
-  let report = `# Validation Report\n\n`;
+  let report = `# Validation Report\n\n` + modeBanner;
   
   if (result.violations.length > 0) {
     report += `## ⛔ Violations (${result.violations.length})\n\n`;
