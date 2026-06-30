@@ -107,12 +107,20 @@ function filterAspectsAgainstConstraints(aspects: Aspect[], spec: ProjectSpec): 
 }
 
 export function isPromptContentValid(content: string, featureName: string, aspect: string): boolean {
+  const hasPlaceholder =
+    /\/\/\s*TODO/i.test(content) ||
+    /\/\/\s*FIXME/i.test(content) ||
+    /\/\*\s*TODO/i.test(content) ||
+    content.includes("add render test") ||
+    content.includes("assert error message is visible") ||
+    content.toLowerCase().includes("your code here");
   const checks = [
     content.includes(featureName),
-    content.includes("src/"),
+    content.includes("src/") || content.includes("app/"),
     content.includes("Acceptance Criteria") || content.includes("- [ ]"),
     !content.includes("expect(true).toBe(true)"),
     !content.includes("export default function feature"),
+    !hasPlaceholder,
     content.includes("interface "),
     content.includes(aspect) || content.toLowerCase().includes(aspect.replaceAll("-", " ").toLowerCase()),
     content.length > 500,
@@ -141,7 +149,12 @@ function getAspectDeliverables(
   spec: ProjectSpec,
 ): { description: string; files: string[] } {
   const slug = slugify(feature);
-  const isNextjs = Object.values(spec.stack ?? {}).some(
+  const platform = spec.platform.toLowerCase();
+  const isMobile = /mobile|ios|android|react.?native|expo/.test(platform);
+  const isWeb = /web|saas|browser|extension/.test(platform);
+  // Next.js paths are ONLY valid on a web/saas platform. On mobile we never
+  // emit App Router paths even if "next" appears in the stack by mistake.
+  const isNextjs = isWeb && Object.values(spec.stack ?? {}).some(
     (v) => v?.value?.toLowerCase().includes('next'),
   );
   const isExpress = Object.values(spec.stack ?? {}).some(
@@ -149,11 +162,19 @@ function getAspectDeliverables(
   );
 
   if (/ui|component|frontend|client/.test(aspectKey)) {
+    const cmp = `src/components/${slug}/${feature.replace(/\s+/g, '')}`;
+    let files: string[];
+    if (isMobile) {
+      // Expo Router screen + presentational components.
+      files = [`app/${slug}.tsx`, `${cmp}Screen.tsx`, `src/components/${slug}/index.ts`];
+    } else if (isNextjs) {
+      files = [`src/app/${slug}/page.tsx`, `${cmp}Client.tsx`, `src/components/${slug}/index.ts`];
+    } else {
+      files = [`src/pages/${slug}.tsx`, `src/components/${slug}/index.tsx`];
+    }
     return {
-      description: `Build the complete **${feature}** user interface for ${spec.projectName}. This includes the page/screen component, all child components, loading/error/empty states, and navigation integration. All external data must arrive via props or hooks — no SDK imports in this layer.`,
-      files: isNextjs
-        ? [`src/app/${slug}/page.tsx`, `src/components/${slug}/${feature.replace(/\s+/g, '')}Client.tsx`, `src/components/${slug}/index.ts`]
-        : [`src/pages/${slug}.tsx`, `src/components/${slug}/index.tsx`],
+      description: `Build the complete **${feature}** user interface for ${spec.projectName}. This includes the ${isMobile ? 'screen' : 'page'} component, all child components, loading/error/empty states, and navigation integration. All external data must arrive via props or hooks — no SDK imports in this layer.`,
+      files,
     };
   }
   if (/api|backend|route|server|endpoint/.test(aspectKey)) {
@@ -168,8 +189,19 @@ function getAspectDeliverables(
     };
   }
   if (/database|schema|migration/.test(aspectKey)) {
+    const usesPostgres = Object.values(spec.stack ?? {}).some(
+      (v) => /supabase|postgres|neon|drizzle|prisma/.test(v?.value?.toLowerCase() ?? ''),
+    );
+    const usesSupabase = Object.values(spec.stack ?? {}).some(
+      (v) => v?.value?.toLowerCase().includes('supabase'),
+    );
+    const securityNote = usesSupabase
+      ? ' RLS policies (Supabase enforces row ownership at the database layer),'
+      : usesPostgres
+      ? ' row-ownership constraints,'
+      : ' user-scoping enforced in every query (this database has no row-level security),';
     return {
-      description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes, RLS policies (if Supabase), and migration files.`,
+      description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes,${securityNote} and migration files.`,
       files: [`src/lib/schema/${slug}.sql`, `src/lib/migrations/001_${slug}.sql`],
     };
   }
@@ -221,13 +253,21 @@ function getAspectAcceptanceCriteria(aspectKey: string, feature: string, spec: P
     `Service module is the only layer that imports external SDKs`,
     `All async operations have try/catch with logged errors`,
   ];
-  if (/database|schema/.test(aspectKey)) return [
-    ...base,
-    `Migration runs without error on a clean database`,
-    `RLS policies prevent users from accessing other users' rows`,
-    `All foreign keys have ON DELETE CASCADE where appropriate`,
-    `Indexes exist on columns used in WHERE clauses`,
-  ];
+  if (/database|schema/.test(aspectKey)) {
+    const usesPostgres = Object.values(spec.stack ?? {}).some(
+      (v) => /supabase|postgres|neon|drizzle|prisma/.test(v?.value?.toLowerCase() ?? ''),
+    );
+    const ownershipCriterion = usesPostgres
+      ? `RLS policies prevent users from accessing other users' rows`
+      : `Every query is scoped by user/owner id — no row-level security is assumed (this DB does not support it)`;
+    return [
+      ...base,
+      `Migration runs without error on a clean database`,
+      ownershipCriterion,
+      `All foreign keys have ON DELETE CASCADE where appropriate`,
+      `Indexes exist on columns used in WHERE clauses`,
+    ];
+  }
   if (/auth/.test(aspectKey)) return [
     ...base,
     `Unauthenticated user accessing protected route is redirected to sign-in`,
@@ -259,9 +299,17 @@ function getAspectAntiPatterns(aspectKey: string, spec: ProjectSpec): string[] {
     patterns.push('Do not skip webhook signature verification — always call `stripe.webhooks.constructEvent()`');
     patterns.push('Do not grant subscription access until the webhook confirms it — not at checkout redirect');
   }
-  if (stackValues.some((v) => v.includes('next'))) {
+  const platform = spec.platform.toLowerCase();
+  const isMobile = /mobile|ios|android|react.?native|expo/.test(platform);
+  const isWeb = /web|saas|browser|extension/.test(platform);
+  if (isWeb && stackValues.some((v) => v.includes('next'))) {
     patterns.push('Do not fetch data in Client Components — fetch in Server Components, pass as props');
     patterns.push('Do not add `"use client"` to a file unless it uses hooks, events, or browser APIs');
+  }
+  if (isMobile) {
+    patterns.push('Do not import next/* , react-dom, or any web-only API — this is a React Native app');
+    patterns.push('Do not use <div>/<span>/HTML elements — use React Native <View>/<Text> primitives');
+    patterns.push('Do not use the Next.js App Router — navigation uses Expo Router / React Navigation');
   }
   if (/ui|component/.test(aspectKey)) {
     patterns.push('Do not import any SDK (Supabase, Stripe, etc.) directly in a component file');
@@ -274,10 +322,12 @@ function getAspectAntiPatterns(aspectKey: string, spec: ProjectSpec): string[] {
 
 function getAspectTestCode(aspectKey: string, feature: string, spec: ProjectSpec): string {
   const slug = slugify(feature);
-  const hasVitest = lockedEntries(spec).some(([, e]) => e.value.toLowerCase().includes('vitest'));
-  const runner = hasVitest ? "import { describe, it, expect, vi, beforeEach } from 'vitest';" : "import { describe, it, expect, jest, beforeEach } from '@jest/globals';";
-  const mockFn = hasVitest ? 'vi.fn()' : 'jest.fn()';
-  const clearMocks = hasVitest ? 'vi.clearAllMocks()' : 'jest.clearAllMocks()';
+  // Vitest is the canonical test runner for the generated project. We never
+  // fall back to Jest imports — the stack validator forbids jest.fn()/@jest
+  // usage and an AI agent should only ever see one consistent runner.
+  const runner = "import { describe, it, expect, vi, beforeEach } from 'vitest';";
+  const mockFn = 'vi.fn()';
+  const clearMocks = 'vi.clearAllMocks()';
 
   if (/api|backend|route/.test(aspectKey)) {
     return `${runner}
@@ -300,15 +350,47 @@ describe('${feature} service', () => {
 });`;
   }
 
-  return `${runner}
+  if (/ui|component|frontend|client/.test(aspectKey)) {
+    return `${runner}
+import { render, screen } from '@testing-library/react';
 
 describe('${feature} — ${aspectKey}', () => {
-  it('renders without crashing', () => {
-    // TODO: add render test for ${feature}
+  it('renders the primary content when data is provided', () => {
+    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View items={[{ id: '1', title: 'Example' }]} />);
+    expect(screen.getByText('Example')).toBeInTheDocument();
   });
 
-  it('handles the error state correctly', () => {
-    // TODO: assert error message is visible
+  it('shows the empty state when there is no data', () => {
+    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View items={[]} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/no .*yet/i);
+  });
+
+  it('shows an error message and a retry control on failure', () => {
+    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View error="Failed to load" />);
+    expect(screen.getByText('Failed to load')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+});`;
+  }
+
+  return `${runner}
+import { ${slug}Reducer, initialState } from '@/features/${slug}/state';
+
+describe('${feature} — ${aspectKey}', () => {
+  it('starts from a well-defined initial state', () => {
+    expect(initialState).toBeDefined();
+    expect(initialState.error).toBeNull();
+  });
+
+  it('updates state in response to a successful action', () => {
+    const next = ${slug}Reducer(initialState, { type: 'loaded', payload: [{ id: '1' }] });
+    expect(next.items).toHaveLength(1);
+    expect(next.error).toBeNull();
+  });
+
+  it('records an error when an action fails', () => {
+    const next = ${slug}Reducer(initialState, { type: 'failed', error: 'boom' });
+    expect(next.error).toBe('boom');
   });
 });`;
 }
