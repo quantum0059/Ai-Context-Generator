@@ -274,10 +274,12 @@ function getAspectAntiPatterns(aspectKey: string, spec: ProjectSpec): string[] {
 
 function getAspectTestCode(aspectKey: string, feature: string, spec: ProjectSpec): string {
   const slug = slugify(feature);
-  const hasVitest = lockedEntries(spec).some(([, e]) => e.value.toLowerCase().includes('vitest'));
-  const runner = hasVitest ? "import { describe, it, expect, vi, beforeEach } from 'vitest';" : "import { describe, it, expect, jest, beforeEach } from '@jest/globals';";
-  const mockFn = hasVitest ? 'vi.fn()' : 'jest.fn()';
-  const clearMocks = hasVitest ? 'vi.clearAllMocks()' : 'jest.clearAllMocks()';
+  // Vitest is the canonical test runner for the generated project. We never
+  // fall back to Jest imports — the stack validator forbids jest.fn()/@jest
+  // usage and an AI agent should only ever see one consistent runner.
+  const runner = "import { describe, it, expect, vi, beforeEach } from 'vitest';";
+  const mockFn = 'vi.fn()';
+  const clearMocks = 'vi.clearAllMocks()';
 
   if (/api|backend|route/.test(aspectKey)) {
     return `${runner}
