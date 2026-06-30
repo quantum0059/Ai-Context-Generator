@@ -20,6 +20,7 @@ import { generateMcpToolDefinition } from "./generators/mcp-tool";
 import { buildSharedContext } from "./generators/shared";
 import { validateGeneratedPackage, type ValidationResult } from "./validators/stack-validator";
 import { generateRequirementsDoc } from "./generators/requirements";
+import { generateArchitecture } from "./generators/architecture";
 import { isClaudeConfigured } from "../lib/claude";
 
 /** No Generic Content rule (Section 14). */
@@ -176,6 +177,7 @@ export async function assemblePackage(
     "README.md": generatePackageReadme(validated),
     "agents.md": agentsContent,
     "requirements.md": generateRequirementsDoc(validated),
+    "architecture.md": generateArchitecture(validated),
     "ai-context.json": generateAiContext(validated),
     "package-meta.json": metaJson,
     "roadmap.md": generateRoadmap(validated, ordered),
