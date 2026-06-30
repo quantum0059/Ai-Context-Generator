@@ -107,12 +107,20 @@ function filterAspectsAgainstConstraints(aspects: Aspect[], spec: ProjectSpec): 
 }
 
 export function isPromptContentValid(content: string, featureName: string, aspect: string): boolean {
+  const hasPlaceholder =
+    /\/\/\s*TODO/i.test(content) ||
+    /\/\/\s*FIXME/i.test(content) ||
+    /\/\*\s*TODO/i.test(content) ||
+    content.includes("add render test") ||
+    content.includes("assert error message is visible") ||
+    content.toLowerCase().includes("your code here");
   const checks = [
     content.includes(featureName),
-    content.includes("src/"),
+    content.includes("src/") || content.includes("app/"),
     content.includes("Acceptance Criteria") || content.includes("- [ ]"),
     !content.includes("expect(true).toBe(true)"),
     !content.includes("export default function feature"),
+    !hasPlaceholder,
     content.includes("interface "),
     content.includes(aspect) || content.toLowerCase().includes(aspect.replaceAll("-", " ").toLowerCase()),
     content.length > 500,
