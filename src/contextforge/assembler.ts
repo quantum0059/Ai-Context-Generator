@@ -29,6 +29,25 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
     "${" + "contextList}",
     "# TODO: install",
   ];
+  // Placeholder tokens that indicate a stub was emitted instead of real,
+  // actionable content. These are an automatic failure in any prompt, test,
+  // or skill file — an autonomous agent reading them has no success definition.
+  const placeholderTokens = [
+    "// TODO",
+    "// FIXME",
+    "/* TODO",
+    "/* FIXME",
+    "# TODO",
+    "# FIXME",
+    "<!-- TODO",
+    "TODO:",
+    "FIXME:",
+    "add render test",
+    "assert error message is visible",
+    "your code here",
+    "implement this",
+    "coming soon",
+  ];
   const qualityFailures: string[] = [];
 
   for (const [path, content] of Object.entries(files)) {
@@ -38,6 +57,26 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
     const forbidden = forbiddenContent.find((token) => content.includes(token));
     if (forbidden) {
       throw new Error(`Generic content violation: ${path} contains forbidden stub content: ${forbidden}`);
+    }
+
+    // Placeholder TODO/FIXME tokens are a hard failure in prompts, tests,
+    // skills, and decision records — these files are handed directly to an
+    // AI agent and must never contain deferred work.
+    const isAgentFacing =
+      path.startsWith("prompts/") ||
+      path.startsWith("skills/") ||
+      path.startsWith("decisions/") ||
+      path === "tech-stack.md" ||
+      path === "agents.md" ||
+      path === "requirements.md";
+    if (isAgentFacing) {
+      const placeholder = placeholderTokens.find((token) => content.includes(token));
+      if (placeholder) {
+        throw new Error(
+          `Generic content violation: ${path} contains a placeholder token ("${placeholder}"). `
+          + "Generated files handed to an AI agent must contain real, complete content — no deferred work.",
+        );
+      }
     }
 
     // Enhanced: prompt files must contain src/ paths AND at least one code block
