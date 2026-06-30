@@ -181,8 +181,19 @@ function getAspectDeliverables(
     };
   }
   if (/database|schema|migration/.test(aspectKey)) {
+    const usesPostgres = Object.values(spec.stack ?? {}).some(
+      (v) => /supabase|postgres|neon|drizzle|prisma/.test(v?.value?.toLowerCase() ?? ''),
+    );
+    const usesSupabase = Object.values(spec.stack ?? {}).some(
+      (v) => v?.value?.toLowerCase().includes('supabase'),
+    );
+    const securityNote = usesSupabase
+      ? ' RLS policies (Supabase enforces row ownership at the database layer),'
+      : usesPostgres
+      ? ' row-ownership constraints,'
+      : ' user-scoping enforced in every query (this database has no row-level security),';
     return {
-      description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes, RLS policies (if Supabase), and migration files.`,
+      description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes,${securityNote} and migration files.`,
       files: [`src/lib/schema/${slug}.sql`, `src/lib/migrations/001_${slug}.sql`],
     };
   }
@@ -234,13 +245,21 @@ function getAspectAcceptanceCriteria(aspectKey: string, feature: string, spec: P
     `Service module is the only layer that imports external SDKs`,
     `All async operations have try/catch with logged errors`,
   ];
-  if (/database|schema/.test(aspectKey)) return [
-    ...base,
-    `Migration runs without error on a clean database`,
-    `RLS policies prevent users from accessing other users' rows`,
-    `All foreign keys have ON DELETE CASCADE where appropriate`,
-    `Indexes exist on columns used in WHERE clauses`,
-  ];
+  if (/database|schema/.test(aspectKey)) {
+    const usesPostgres = Object.values(spec.stack ?? {}).some(
+      (v) => /supabase|postgres|neon|drizzle|prisma/.test(v?.value?.toLowerCase() ?? ''),
+    );
+    const ownershipCriterion = usesPostgres
+      ? `RLS policies prevent users from accessing other users' rows`
+      : `Every query is scoped by user/owner id — no row-level security is assumed (this DB does not support it)`;
+    return [
+      ...base,
+      `Migration runs without error on a clean database`,
+      ownershipCriterion,
+      `All foreign keys have ON DELETE CASCADE where appropriate`,
+      `Indexes exist on columns used in WHERE clauses`,
+    ];
+  }
   if (/auth/.test(aspectKey)) return [
     ...base,
     `Unauthenticated user accessing protected route is redirected to sign-in`,
