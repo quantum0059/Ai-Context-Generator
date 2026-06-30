@@ -46,7 +46,7 @@ export function validateGeneratedPackage(
     'tailwindcss': ['tailwindcss', 'clsx', 'tailwind-merge'],
     'vitest': ['vitest', '@testing-library/react', '@testing-library/jest-dom'],
     // AI providers — npm names differ from display names
-    'google gemini': ['@google/generative-ai'],
+    'google gemini': ['@google/generative-ai'], // verified
     'gemini': ['@google/generative-ai'],
     'openai': ['openai'],
     'anthropic': ['@anthropic-ai/sdk'],
