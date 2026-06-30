@@ -148,3 +148,5 @@ create table subscriptions (
 - Registry admin panel UI with local edits persisted in browser storage for admin demos.
 - Plan enforcement on generation limits: free tier limited to 5 monthly generations, Pro tier limited to 100.
 - Loading a saved package back into the wizard from the dashboard for selective regeneration.
+
+<!-- this is mirrored -->
