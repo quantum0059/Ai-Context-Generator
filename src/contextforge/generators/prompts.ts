@@ -300,15 +300,47 @@ describe('${feature} service', () => {
 });`;
   }
 
-  return `${runner}
+  if (/ui|component|frontend|client/.test(aspectKey)) {
+    return `${runner}
+import { render, screen } from '@testing-library/react';
 
 describe('${feature} — ${aspectKey}', () => {
-  it('renders without crashing', () => {
-    // TODO: add render test for ${feature}
+  it('renders the primary content when data is provided', () => {
+    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View items={[{ id: '1', title: 'Example' }]} />);
+    expect(screen.getByText('Example')).toBeInTheDocument();
   });
 
-  it('handles the error state correctly', () => {
-    // TODO: assert error message is visible
+  it('shows the empty state when there is no data', () => {
+    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View items={[]} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/no .*yet/i);
+  });
+
+  it('shows an error message and a retry control on failure', () => {
+    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View error="Failed to load" />);
+    expect(screen.getByText('Failed to load')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+});`;
+  }
+
+  return `${runner}
+import { ${slug}Reducer, initialState } from '@/features/${slug}/state';
+
+describe('${feature} — ${aspectKey}', () => {
+  it('starts from a well-defined initial state', () => {
+    expect(initialState).toBeDefined();
+    expect(initialState.error).toBeNull();
+  });
+
+  it('updates state in response to a successful action', () => {
+    const next = ${slug}Reducer(initialState, { type: 'loaded', payload: [{ id: '1' }] });
+    expect(next.items).toHaveLength(1);
+    expect(next.error).toBeNull();
+  });
+
+  it('records an error when an action fails', () => {
+    const next = ${slug}Reducer(initialState, { type: 'failed', error: 'boom' });
+    expect(next.error).toBe('boom');
   });
 });`;
 }
