@@ -43,7 +43,21 @@ export function validateGeneratedPackage(
     'prisma': ['@prisma/client'],
     'zustand': ['zustand'],
     'tailwind css': ['tailwindcss', 'clsx', 'tailwind-merge'],
+    'tailwindcss': ['tailwindcss', 'clsx', 'tailwind-merge'],
     'vitest': ['vitest', '@testing-library/react', '@testing-library/jest-dom'],
+    // AI providers — npm names differ from display names
+    'google gemini': ['@google/generative-ai'], // verified
+    'gemini': ['@google/generative-ai'],
+    'openai': ['openai'],
+    'anthropic': ['@anthropic-ai/sdk'],
+    'claude': ['@anthropic-ai/sdk'],
+    'groq': ['groq-sdk'],
+    'resend': ['resend'],
+    'firebase': ['firebase'],
+    'convex': ['convex'],
+    'neon': ['@neondatabase/serverless'],
+    'better-sqlite3': ['better-sqlite3'],
+    'cloudinary': ['cloudinary', 'next-cloudinary'],
   }
 
   // Build allowed package set from locked stack
@@ -95,6 +109,15 @@ export function validateGeneratedPackage(
         ...Array.from(content.matchAll(requireRegex))
       ]) {
         const fullPkg = match[1]
+
+        // Skip internal path-alias imports (`@/...`) — these resolve to the
+        // project's own source, not an npm package.
+        if (fullPkg.startsWith('@/') || fullPkg.startsWith('~/')) continue
+
+        // Skip template placeholders: angle-bracket tokens like
+        // `@/services/<resource>` or the literal `external-package`.
+        if (fullPkg.includes('<') || fullPkg.includes('>') || fullPkg === 'external-package') continue
+
         // Resolve the npm package "base": for scoped packages keep
         // @scope/name; otherwise take the first path segment.
         const base = fullPkg.startsWith('@')
