@@ -41,6 +41,104 @@ const richFeatureSetSchema = z.object({
   outOfScopeGlobal: z.array(z.string()),
 });
 
+// ─── Product-archetype inference (vague-description fallback) ─────────────────
+
+type FeatureDefBase = Omit<RichFeature, "isUserProvided">;
+
+/**
+ * When a description names no concrete features, infer the baseline feature
+ * set a comparable real product in the same category would ship. This is the
+ * deterministic stand-in for "look up what products like this normally do":
+ * it maps the description to a product archetype and returns that archetype's
+ * standard features. Only used by the heuristic path (no AI configured).
+ */
+function archetypeFeatures(text: string, projectType: string): FeatureDefBase[] {
+  // Backend/CLI/library projects do not get UI-centric archetype features.
+  if (projectType === "CLI_TOOL" || projectType === "LIBRARY_OR_SDK") return [];
+
+  const f = (
+    name: string,
+    description: string,
+    priority: RichFeature["priority"],
+    acceptanceCriteria: string[],
+    technicalImplications: string[],
+    dependsOn: string[] = [],
+  ): FeatureDefBase => ({
+    name,
+    epic: "Core Product",
+    description,
+    priority,
+    userRole: "end-user",
+    acceptanceCriteria,
+    outOfScope: [],
+    dependsOn,
+    technicalImplications,
+  });
+
+  const archetypes: Array<{ match: RegExp; features: FeatureDefBase[] }> = [
+    {
+      match: /\b(marketplace|classified|listing|buy and sell|two[- ]sided)\b/,
+      features: [
+        f("Listing Creation & Management", "Sellers can create, edit, and remove listings with images and pricing.", "must-have", ["A seller can publish a listing with title, description, price, and images", "Listings can be edited and taken down by their owner"], ["database", "storage"]),
+        f("Browse & Search Listings", "Buyers can browse, search, and filter available listings.", "must-have", ["Listings are searchable by keyword", "Results can be filtered by category and price"], ["database", "searchProvider"]),
+        f("Buyer–Seller Messaging", "Buyers and sellers communicate about a listing in-app.", "should-have", ["A buyer can message a seller about a specific listing", "Both parties see a threaded conversation history"], ["database", "websocket"]),
+      ],
+    },
+    {
+      match: /\b(booking|reservation|appointment|schedule|calendar)\b/,
+      features: [
+        f("Availability & Scheduling", "Providers publish availability and customers book open slots.", "must-have", ["A provider can define available time slots", "A customer can book an open slot and receives confirmation"], ["database"]),
+        f("Booking Management", "Customers and providers view, reschedule, and cancel bookings.", "must-have", ["A customer can cancel or reschedule within the allowed window", "Cancellations free the slot for others"], ["database"]),
+        f("Reminders & Notifications", "Automated reminders reduce no-shows.", "should-have", ["A reminder is sent before the appointment", "Users can opt out of reminders"], ["email", "database"]),
+      ],
+    },
+    {
+      match: /\b(social|community|feed|follow|post|share)\b/,
+      features: [
+        f("User Profiles", "Members have a public profile with their activity.", "must-have", ["A user can set a display name, avatar, and bio", "Other users can view a member's public profile"], ["database", "storage"]),
+        f("Content Feed", "Members create posts and see a personalised feed.", "must-have", ["A user can publish a post that appears in followers' feeds", "The feed loads incrementally as the user scrolls"], ["database"]),
+        f("Follow & Engagement", "Members follow others and react to content.", "should-have", ["A user can follow and unfollow other members", "A user can like or comment on a post"], ["database"]),
+      ],
+    },
+    {
+      match: /\b(saas|dashboard|b2b|productivity|management tool|internal tool|crm|erp)\b/,
+      features: [
+        f("Workspace & Team Management", "Users work inside a shared workspace with roles.", "must-have", ["An owner can invite members to a workspace", "Members are assigned roles that gate permissions"], ["authentication", "database"]),
+        f("Core Records Management", "Users create, view, update, and delete the primary domain records.", "must-have", ["A user can create and edit the core record type", "Records are listed with search and pagination"], ["database"]),
+        f("Reporting & Insights", "Users see key metrics for their workspace.", "should-have", ["A dashboard shows at least three core metrics", "Data can be exported"], ["analytics", "database"]),
+      ],
+    },
+    {
+      match: /\b(shop|store|e[- ]?commerce|cart|product catalog|retail)\b/,
+      features: [
+        f("Product Catalog", "Shoppers browse products organised by category.", "must-have", ["Products are listed with images, price, and description", "Products can be filtered by category"], ["database", "storage"]),
+        f("Shopping Cart & Checkout", "Shoppers add items to a cart and check out.", "must-have", ["Items can be added to and removed from the cart", "Checkout collects shipping and confirms the order"], ["database", "payments"]),
+        f("Order History", "Customers review their past orders and status.", "should-have", ["A customer can view a list of their past orders", "Each order shows its current fulfilment status"], ["database"]),
+      ],
+    },
+    {
+      match: /\b(blog|cms|publication|magazine|news|editorial|articles?)\b/,
+      features: [
+        f("Content Authoring", "Authors write and publish richly formatted content.", "must-have", ["An author can draft, edit, and publish an article", "Drafts are saved automatically"], ["database", "cms"]),
+        f("Content Browsing", "Readers browse and read published content.", "must-have", ["Published articles are listed newest-first", "An article renders its full formatted content"], ["database"]),
+        f("Categories & Search", "Readers find content by topic or search.", "should-have", ["Articles are grouped by category or tag", "Readers can search article titles and bodies"], ["searchProvider", "database"]),
+      ],
+    },
+  ];
+
+  for (const archetype of archetypes) {
+    if (archetype.match.test(text)) return archetype.features;
+  }
+
+  // Generic UI application baseline when no specific archetype matches but the
+  // project clearly has an interface. Better than a lone "Core Feature" stub.
+  return [
+    f("Primary User Workflow", "The main end-to-end task the product exists to support.", "must-have", ["A user can complete the product's primary task start to finish", "Progress is preserved if the user leaves and returns"], ["database"]),
+    f("Content or Data Management", "Users create and manage the core data the product works with.", "must-have", ["A user can create and edit the core data entity", "Data is validated before it is saved"], ["database"]),
+    f("Account & Settings", "Users manage their profile and preferences.", "should-have", ["A user can update their profile details", "Preferences persist across sessions"], ["authentication", "database"]),
+  ];
+}
+
 // ─── Heuristic fallback (no AI configured) ───────────────────────────────────
 
 /**
@@ -280,24 +378,31 @@ function heuristicRichFeatureSet(
   const filteredUx = uxFeatures.filter(notProvided);
   if (filteredUx.length > 0) epics.push({ name: "User Experience", features: filteredUx });
 
-  // If we produced nothing at all, push one generic placeholder
+  // If keyword analysis produced nothing (a vague description that names no
+  // concrete features), infer the baseline feature set from the product
+  // archetype instead of emitting a single useless "Core Feature" placeholder.
   if (epics.length === 0) {
-    epics.push({
-      name: "Core Product",
-      features: [
-        {
-          name: "Core Feature",
-          epic: "Core Product",
-          description: "Primary functionality of the project.",
-          priority: "must-have",
-          userRole: "end-user",
-          acceptanceCriteria: ["Feature behaves as described in the project brief", "Error states are handled gracefully"],
-          outOfScope: [],
-          dependsOn: [],
-          technicalImplications: [],
-        },
-      ],
-    });
+    const inferred = archetypeFeatures(text, projectType).filter(notProvided);
+    if (inferred.length > 0) {
+      epics.push({ name: "Core Product", features: inferred });
+    } else {
+      epics.push({
+        name: "Core Product",
+        features: [
+          {
+            name: "Core Feature",
+            epic: "Core Product",
+            description: "Primary functionality of the project.",
+            priority: "must-have",
+            userRole: "end-user",
+            acceptanceCriteria: ["Feature behaves as described in the project brief", "Error states are handled gracefully"],
+            outOfScope: [],
+            dependsOn: [],
+            technicalImplications: [],
+          },
+        ],
+      });
+    }
   }
 
   // Derive critical path: foundation first, then domain, then the rest
@@ -356,7 +461,13 @@ export async function POST(req: Request) {
   // ── AI path ─────────────────────────────────────────────────────────────────
   const systemPrompt = `You are a senior software architect performing structured feature extraction for a software project. Your output feeds directly into an AI-driven code generation pipeline, so it must be precise, complete, and architecturally sound.
 
-Work through FIVE mandatory steps in order:
+Work through the mandatory steps in order:
+
+STEP 0 — PRODUCT CATEGORY & COMPLETENESS CHECK
+First identify what KIND of product this is (e.g. marketplace, booking platform, social app, SaaS dashboard, e-commerce store, blog/CMS, developer tool). Then judge how detailed the description is:
+- If the description already names concrete features, extract those and add the implicit ones they require.
+- If the description is VAGUE and names few or no features, you MUST infer the standard, expected feature set that comparable, successful real-world products in this exact category ship. Draw on your knowledge of how such products are actually built. Mark these inferred features with priority reflecting how essential they are, and treat them as "implicit". Never return a single generic "core feature" — a real product in this category has a known baseline of features, so produce it.
+The user must never leave this step with an empty or near-empty feature list just because they wrote a short description.
 
 STEP 1 — PROJECT ANALYSIS
 Read the description carefully. Identify:
@@ -423,7 +534,9 @@ Project Type: ${projectType}
 
 Features the user already has (DO NOT duplicate these): ${existingFeatures.length > 0 ? existingFeatures.join(", ") : "none"}
 
-Suggest 6-12 features in total across all epics. Make every feature specific to THIS project — not generic boilerplate that would apply to any app. Think about what a real architect would scope and sequence for this exact product.`;
+Suggest 6-12 features in total across all epics. Make every feature specific to THIS project — not generic boilerplate that would apply to any app. Think about what a real architect would scope and sequence for this exact product.
+
+If the description above is short or vague, do NOT under-deliver: infer the complete baseline feature set that a real, shipping product in this category is expected to have, so a non-technical user gets a usable starting point without having to think of every feature themselves.`;
 
   try {
     const result = await claudeJson(

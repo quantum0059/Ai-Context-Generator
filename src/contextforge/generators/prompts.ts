@@ -130,10 +130,15 @@ export function isPromptContentValid(content: string, featureName: string, aspec
     content.includes("add render test") ||
     content.includes("assert error message is visible") ||
     content.toLowerCase().includes("your code here");
+  const lower = content.toLowerCase();
   const checks = [
     content.includes(featureName),
     content.includes("src/") || content.includes("app/"),
     content.includes("Acceptance Criteria") || content.includes("- [ ]"),
+    // Completion contract: every emitted prompt must define "done" and tell the
+    // agent to verify its own work before finishing.
+    lower.includes("definition of done"),
+    lower.includes("self-verification") || lower.includes("self verification"),
     !content.includes("expect(true).toBe(true)"),
     !content.includes("export default function feature"),
     !hasPlaceholder,
@@ -183,6 +188,87 @@ function heuristicFeatureAspects(spec: ProjectSpec, feature: string): Aspect[] {
     { aspect: "ui-components", title: `Build UI components for ${feature}`, description: "User interface and state" },
     { aspect: "core-logic", title: `Build core logic for ${feature}`, description: "Local data/service layer (no network)" },
   ];
+}
+
+// ─── Per-feature requirement context (from the extraction pipeline) ──────────
+
+/**
+ * Pulls the requirement signal already computed upstream (by the
+ * requirement-extractor and feature-extraction pipelines) for THIS feature and
+ * formats it into a markdown block. Feeding these real acceptance criteria,
+ * edge cases, and domain entities into the implementation prompt is what makes
+ * the generated instructions project-specific and hard to get wrong — the
+ * agent is told exactly what "done" means and exactly what must not break.
+ *
+ * Returns an empty string when no structured requirements are available so the
+ * prompt degrades gracefully to its generic sections.
+ */
+function buildFeatureRequirementContext(spec: ProjectSpec, feature: string): string {
+  const req = spec.architecturalRequirements;
+  if (!req) return "";
+
+  const featureText = feature.toLowerCase();
+  const words = featureText.split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+  const matches = (haystack: string): boolean => {
+    const h = haystack.toLowerCase();
+    return words.some((w) => h.includes(w));
+  };
+
+  const sections: string[] = [];
+
+  // Functional requirements that relate to this feature.
+  const relatedFunctional = (req.functional ?? []).filter(
+    (fr) => matches(fr.title) || matches(fr.description),
+  );
+  if (relatedFunctional.length > 0) {
+    sections.push(
+      "### Requirements This Aspect Must Satisfy\n" +
+        relatedFunctional
+          .map(
+            (fr) =>
+              `- **${fr.id} (${fr.priority}${fr.type === "implicit" ? ", implicit" : ""}):** ${fr.title} — ${fr.description}`,
+          )
+          .join("\n"),
+    );
+  }
+
+  // Edge cases relevant to this feature (or universally important categories).
+  const relatedEdgeCases = (req.edgeCases ?? []).filter(
+    (ec) =>
+      matches(ec.scenario) ||
+      matches(ec.expectedBehaviour) ||
+      ["input-validation", "data", "auth", "network"].includes(ec.category),
+  );
+  if (relatedEdgeCases.length > 0) {
+    sections.push(
+      "### Edge Cases That MUST Be Handled\n" +
+        "Every one of these must have explicit handling and a test. Silent failure is a defect.\n" +
+        relatedEdgeCases
+          .slice(0, 8)
+          .map((ec) => `- **${ec.category}:** When ${ec.scenario} → ${ec.expectedBehaviour}`)
+          .join("\n"),
+    );
+  }
+
+  // Domain entities this feature likely touches.
+  const relatedEntities = (req.domain?.entities ?? []).filter(
+    (e) => matches(e.name) || matches(e.description),
+  );
+  if (relatedEntities.length > 0) {
+    sections.push(
+      "### Domain Entities In Play\n" +
+        relatedEntities
+          .map(
+            (e) =>
+              `- **${e.name}** (${e.attributes.join(", ")})${e.relatedEntities.length ? ` → related to ${e.relatedEntities.join(", ")}` : ""}`,
+          )
+          .join("\n"),
+    );
+  }
+
+  if (sections.length === 0) return "";
+
+  return `\n## Feature Requirement Context\n\nThe following was extracted from the project's requirement analysis and is specific to this feature. Treat it as authoritative.\n\n${sections.join("\n\n")}\n`;
 }
 
 // ─── Aspect-specific deliverable descriptors ─────────────────────────────────
@@ -452,6 +538,7 @@ function richFallbackPrompt(
   const testCode = getAspectTestCode(aspect.aspect, feature, spec);
   const snippets = buildTechCodeSnippets(spec);
   const schema = buildSharedDatabaseSchema(spec);
+  const requirementContext = buildFeatureRequirementContext(spec, feature);
 
   const stackTable = lockedEntries(spec)
     .map(([cat, e]) => `| ${cat} | ${e.value} |`)
@@ -496,7 +583,7 @@ ${deliverables.description}
 | Category | Technology |
 |---|---|
 ${stackTable}
-
+${requirementContext}
 ---
 
 ## Required File Structure
@@ -530,7 +617,35 @@ ${criteria.map((c) => `- [ ] ${c}`).join('\n')}
 
 ---
 
+## Definition of Done
+
+This aspect is complete ONLY when every one of the following is true. If any is false, the work is not done.
+
+- [ ] Every file listed in **Required File Structure** exists at its exact path and compiles.
+- [ ] Every item in **Acceptance Criteria** is satisfied.
+- [ ] Every scenario in **Edge Cases That MUST Be Handled** has explicit handling and a corresponding test (when this section is present).
+- [ ] No technology outside the locked stack is imported anywhere.
+- [ ] All inputs crossing a trust boundary are validated before use.
+- [ ] Every async operation has explicit error handling — no unhandled rejections, no swallowed errors.
+- [ ] The test file runs and all tests pass with the project's runner.
+
+---
+
+## Self-Verification (run before you report done)
+
+After implementing, verify your own output by answering each question. If any answer is "no", fix it before finishing:
+
+1. Did I create files at the EXACT paths above, and only those paths?
+2. Did I import ONLY packages from the locked stack table?
+3. For every edge case listed, can I point to the line that handles it and the test that proves it?
+4. Does every exported function have an explicit return type and no \`any\`?
+5. Would another feature depending on this one find the exports and types it expects?
+
+---
+
 ## Test Cases
+
+Implement these tests and ensure they pass. Add one test per listed edge case.
 
 \`\`\`typescript
 ${testCode}
@@ -549,20 +664,24 @@ async function generateAspectPrompt(
     const constraintBlock = buildConstraintBlock(spec);
     const snippets = buildTechCodeSnippets(spec);
     const schema = buildSharedDatabaseSchema(spec);
+    const requirementContext = buildFeatureRequirementContext(spec, feature);
 
-    const systemPrompt = `${constraintBlock}You are a senior engineer writing implementation instructions for an AI coding assistant. The AI will read ONLY this file before implementing this aspect. Be so specific that the AI produces correct code on the first attempt.
+    const systemPrompt = `${constraintBlock}You are a Principal Engineer writing an implementation brief for an AI coding assistant. The assistant will read ONLY this file before implementing this aspect — it has no other context. Your brief must be so precise, complete, and unambiguous that a correct implementation is the ONLY reasonable output. Leave no decision to guesswork.
 
 Rules:
-- Include exact file paths to create or modify
+- Include exact file paths to create or modify (every path starts with src/)
 - Include the complete TypeScript interface/type definitions the AI must use
-- Include the exact function signatures to implement
-- Include real example code for the most complex part
+- Include the exact function signatures to implement, with explicit return types
+- Include real example code for the most complex part — no pseudo-code, no placeholders
+- Every edge case provided in the requirement context MUST appear with explicit expected handling AND a matching test
 - Include explicit acceptance criteria as a checklist
-- Include the exact test cases that prove it works
+- Include a "Definition of Done" and a "Self-Verification" checklist the assistant must satisfy before reporting completion
+- Include the exact test cases that prove it works, including one test per edge case
 - Include what NOT to do for this specific stack
 - Never say 'implement X' without showing what X looks like for this project's stack
 - Say "Required File Structure" not "Suggested File Structure"
-${sharedContext}
+- Do NOT emit TODO/FIXME/'your code here' or any placeholder — such output is an automatic failure
+${requirementContext}${sharedContext}
 ${snippets}
 ${schema}`;
 
@@ -607,10 +726,16 @@ Include one real TypeScript code snippet showing the correct pattern.
 List specific anti-patterns for this exact stack.
 
 ## Acceptance Criteria
-Include at least 3 specific, testable checkbox items using - [ ].
+Include at least 3 specific, testable checkbox items using - [ ]. If a Feature Requirement Context was provided in the system prompt, every listed requirement and edge case must be reflected here.
+
+## Definition of Done
+A checklist (- [ ]) that is true only when the aspect is fully complete: all files compile, all acceptance criteria met, every edge case handled and tested, only locked-stack imports used, all inputs validated, all async paths have error handling.
+
+## Self-Verification
+3-5 questions the assistant must answer "yes" to before reporting done (correct paths, only locked-stack imports, every edge case handled and tested, explicit return types with no any, exports usable by dependent features).
 
 ## Test Cases
-Include real test code without placeholder assertions.`;
+Include real test code without placeholder assertions, with one test per edge case listed above.`;
 
     try {
       const content = await claudeText(systemPrompt, userPrompt, 1, MODELS.CONTENT);
