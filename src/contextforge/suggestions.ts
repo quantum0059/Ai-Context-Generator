@@ -267,6 +267,12 @@ export async function suggestForCategory(
         `## Project Context\n${contextBlock}${toolsBlock}\n\n` +
         `Suggest 2–3 real, currently-maintained tools for the "${category}" category.\n` +
         `Rules:\n` +
+        `- The FIRST candidate must be the single best default for THIS project given its ` +
+        `description, features, platform, and budget — the choice a pragmatic senior engineer ` +
+        `would pick so a non-technical user can accept it as-is without further research. ` +
+        `The remaining candidates are alternatives for users who want to compare.\n` +
+        `- Prefer tools that integrate well with any already-selected parts of the stack and ` +
+        `that fit the stated budget (favour generous free tiers when budget is tight).\n` +
         `- You may select from the Known Registry Tools, or suggest any other tool you believe is better suited.\n` +
         `- Only suggest tools that genuinely exist on npm (or the relevant package registry).\n` +
         `- Set confidence to "high" ONLY if you are certain the package exists, is actively maintained, ` +
@@ -334,16 +340,18 @@ function buildFallbackResult(
     return {
       category,
       tier: "registry",
-      candidates: eligibleTools.slice(0, 3).map((e) => ({
+      candidates: eligibleTools.slice(0, 3).map((e, i) => ({
         name: e.name,
         rationale:
-          `${e.skillGenerationHints} Pros: ${e.pros.join("; ")}. ` +
-          `⚠️ This suggestion is based on platform defaults — no contextual analysis was performed. Verify this choice fits your specific requirements.`,
+          i === 0
+            ? `Recommended default for this category. ${e.skillGenerationHints} Pros: ${e.pros.join("; ")}.`
+            : `Alternative. ${e.skillGenerationHints} Pros: ${e.pros.join("; ")}.`,
         docsUrl: e.docsUrl,
         pricing: e.pricing,
         freeTier: e.freeTier,
         source: "suggested" as const,
-        // LOW confidence: not reasoned from context, just sorted by priority
+        // LOW confidence: chosen by registry priority, not contextual reasoning,
+        // so downstream skill files still emit a verify-against-docs note.
         confidence: "low" as const,
       })),
     };
