@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useWizard } from "../wizard-context";
+import { ListChecks } from "lucide-react";
 import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
+import { WizardStepHeader } from "@/components/wizard/step-header";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 import { Button } from "@/components/ui/button";
 import { inferPlatform } from "@/lib/inferPlatform";
@@ -318,16 +320,17 @@ export default function FeaturesPage() {
       <StepIndicator currentStep={2} />
 
       <main className="mx-auto max-w-[720px] px-4 py-10">
-        <div className="text-center">
-          <h1 className="text-[28px] font-bold text-white">Select Features</h1>
-          <p className="mx-auto mt-3 max-w-[520px] text-sm text-[#888]">
-            {loading
+        <WizardStepHeader
+          icon={ListChecks}
+          title="Select Features"
+          subtitle={
+            loading
               ? "Analysing your project description…"
               : engine === "ai"
               ? "Features have been grouped into Epics and prioritised by a senior architect. Select what applies."
-              : "Suggested features based on your project. Select what applies or add your own."}
-          </p>
-        </div>
+              : "Suggested features based on your project. Select what applies or add your own."
+          }
+        />
 
         <div className="mt-8 rounded-xl border border-white/[0.08] bg-[#111111] p-6">
           {/* Loading */}
