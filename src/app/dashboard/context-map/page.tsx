@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -13,12 +13,87 @@ import ReactFlow, {
   useEdgesState,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { Sparkles, Upload } from "lucide-react";
+import { RefreshCw, Sparkles, Upload } from "lucide-react";
 
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { ContextNode } from "@/components/graph/context-node";
 import { LegendPanel } from "@/components/graph/legend-panel";
 import { DependenciesPanel } from "@/components/graph/dependencies-panel";
+
+// ─── Repo tree → graph ────────────────────────────────────────────────────────
+
+interface TreeEntry {
+  path: string;
+  type: "blob" | "tree";
+}
+
+const defaultEdgeStyleTop = {
+  stroke: "rgba(255,255,255,0.20)",
+  strokeWidth: 1.5,
+  strokeDasharray: "5 5",
+};
+const defaultMarkerEndTop = {
+  type: MarkerType.ArrowClosed,
+  color: "rgba(255,255,255,0.30)",
+};
+
+/**
+ * Converts a flat, recursive repo file tree into React Flow nodes/edges laid
+ * out as a directory hierarchy: depth drives the X column, sibling order drives
+ * Y. Directories render as "center"-style nodes, files as default nodes.
+ */
+function treeToGraph(entries: TreeEntry[]): { nodes: Node[]; edges: Edge[] } {
+  const COL_WIDTH = 260;
+  const ROW_HEIGHT = 64;
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  const rowByDepth = new Map<number, number>();
+
+  // Root node.
+  nodes.push({
+    id: "__root__",
+    position: { x: 0, y: 0 },
+    data: { label: "Repository", subtitle: `${entries.length} entries`, variant: "center" },
+    type: "centerNode",
+  });
+
+  // Sort so parents are processed before children and order is stable.
+  const sorted = [...entries].sort((a, b) => a.path.localeCompare(b.path));
+
+  for (const entry of sorted) {
+    const segments = entry.path.split("/");
+    const depth = segments.length; // 1 = top-level
+    const row = rowByDepth.get(depth) ?? 0;
+    rowByDepth.set(depth, row + 1);
+
+    const id = entry.path;
+    const parentId = segments.length > 1 ? segments.slice(0, -1).join("/") : "__root__";
+    const name = segments[segments.length - 1];
+
+    nodes.push({
+      id,
+      position: { x: depth * COL_WIDTH, y: row * ROW_HEIGHT },
+      data: {
+        label: name,
+        subtitle: entry.type === "tree" ? "Folder" : "File",
+        variant: entry.type === "tree" ? "center" : undefined,
+      },
+      type: entry.type === "tree" ? "centerNode" : "defaultNode",
+    });
+
+    edges.push({
+      id: `${parentId}->${id}`,
+      source: parentId,
+      target: id,
+      type: "default",
+      animated: false,
+      style: defaultEdgeStyleTop,
+      markerEnd: defaultMarkerEndTop,
+    });
+  }
+
+  return { nodes, edges };
+}
 
 const nodeTypes = {
   centerNode: ContextNode,
