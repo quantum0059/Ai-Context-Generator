@@ -280,24 +280,31 @@ function heuristicRichFeatureSet(
   const filteredUx = uxFeatures.filter(notProvided);
   if (filteredUx.length > 0) epics.push({ name: "User Experience", features: filteredUx });
 
-  // If we produced nothing at all, push one generic placeholder
+  // If keyword analysis produced nothing (a vague description that names no
+  // concrete features), infer the baseline feature set from the product
+  // archetype instead of emitting a single useless "Core Feature" placeholder.
   if (epics.length === 0) {
-    epics.push({
-      name: "Core Product",
-      features: [
-        {
-          name: "Core Feature",
-          epic: "Core Product",
-          description: "Primary functionality of the project.",
-          priority: "must-have",
-          userRole: "end-user",
-          acceptanceCriteria: ["Feature behaves as described in the project brief", "Error states are handled gracefully"],
-          outOfScope: [],
-          dependsOn: [],
-          technicalImplications: [],
-        },
-      ],
-    });
+    const inferred = archetypeFeatures(text, projectType).filter(notProvided);
+    if (inferred.length > 0) {
+      epics.push({ name: "Core Product", features: inferred });
+    } else {
+      epics.push({
+        name: "Core Product",
+        features: [
+          {
+            name: "Core Feature",
+            epic: "Core Product",
+            description: "Primary functionality of the project.",
+            priority: "must-have",
+            userRole: "end-user",
+            acceptanceCriteria: ["Feature behaves as described in the project brief", "Error states are handled gracefully"],
+            outOfScope: [],
+            dependsOn: [],
+            technicalImplications: [],
+          },
+        ],
+      });
+    }
   }
 
   // Derive critical path: foundation first, then domain, then the rest
