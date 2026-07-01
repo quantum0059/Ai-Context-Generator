@@ -116,14 +116,13 @@ export default function StackPage() {
         const relevant = discovered.filter((category) => category.relevantToProjectType !== false);
         if (!relevant.length) throw new Error("No relevant technology categories were discovered");
         if (cancelled) return;
-        
-        const discoveredKeys = new Set(relevant.map(c => c.key));
-        const missingCategories = Object.keys(CATEGORY_META)
-          .filter(key => !discoveredKeys.has(key))
-          .map(categoryFromKey);
-          
-        const allCategories = [...relevant, ...missingCategories];
-        
+
+        // Only render the categories that Dynamic Category Discovery deemed
+        // relevant to THIS project. Previously the entire CATEGORY_META map was
+        // appended here, which surfaced out-of-context categories (Payments,
+        // Email, Auth, Search, ...) on every project regardless of type.
+        const allCategories = relevant;
+
         setCategories(allCategories);
         const allowed = new Set(allCategories.map((category) => category.key));
         const relevantStack = Object.fromEntries(
