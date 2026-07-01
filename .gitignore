@@ -19,3 +19,10 @@ generate_test.js
 test-output.json
 review-output.txt
 review.md
+
+# Ad-hoc manual API probe scripts (not part of the vitest suite)
+/test-api*.js
+/test-discover*.js
+/test-discovery.js
+/test-huge.js
+/test-constraints.ts
