@@ -10,6 +10,14 @@ export interface Repository {
   visibility: "public" | "private";
 }
 
+/** A single entry in a repository's file tree. */
+export interface TreeEntry {
+  /** Full path relative to the repo root, e.g. "src/lib/utils.ts". */
+  path: string;
+  /** "blob" for files, "tree" for directories. */
+  type: "blob" | "tree";
+}
+
 /** OAuth token exchange result. */
 export interface AuthResult {
   accessToken: string;
@@ -30,6 +38,16 @@ export interface GitProvider {
     accessToken: string,
     params?: { page?: number; search?: string },
   ): Promise<Repository[]>;
+
+  /**
+   * Returns the recursive file tree of a repository at a given ref.
+   * Used to render the connected repo's real structure in the context map.
+   */
+  listTree(
+    accessToken: string,
+    repo: string,
+    ref?: string,
+  ): Promise<TreeEntry[]>;
 
   createRepository(
     accessToken: string,
