@@ -238,6 +238,37 @@ export async function assemblePackage(
   return { files, meta };
 }
 
+/**
+ * Builds a prominent banner listing blocking validation violations, prepended
+ * to agents.md so an AI agent sees package defects before anything else.
+ */
+function buildViolationBanner(
+  violations: ValidationResult["violations"],
+): string {
+  const byFile = new Map<string, string[]>();
+  for (const v of violations) {
+    const list = byFile.get(v.file) ?? [];
+    list.push(`${v.type}: \`${v.found}\` — ${v.message}`);
+    byFile.set(v.file, list);
+  }
+
+  const lines = [...byFile.entries()]
+    .map(([file, issues]) => `- **${file}**\n` + issues.map((i) => `  - ${i}`).join("\n"))
+    .join("\n");
+
+  return (
+    `> # ⛔ STOP — PACKAGE VALIDATION FAILED (${violations.length} issue${violations.length === 1 ? "" : "s"})\n` +
+    `>\n` +
+    `> This context package contains content that violates its own locked stack.\n` +
+    `> Do NOT implement against the files below until these are resolved. A\n` +
+    `> phantom (non-existent) package or forbidden import will break the build.\n` +
+    `> See \`validation-report.md\` for the full report.\n` +
+    `>\n` +
+    lines.split("\n").map((l) => `> ${l}`).join("\n") +
+    `\n>\n> ---\n\n`
+  );
+}
+
 function generateValidationReport(
   result: ValidationResult,
   aiEnabled = true,
