@@ -8,3 +8,14 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 .commandcode/
+
+# Runtime / APM caches (should never be committed)
+arms_cache/
+
+# Local scratch, generated review and test output
+scratch.js
+scratch-*.mjs
+generate_test.js
+test-output.json
+review-output.txt
+review.md
