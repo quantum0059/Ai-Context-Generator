@@ -461,7 +461,13 @@ export async function POST(req: Request) {
   // ── AI path ─────────────────────────────────────────────────────────────────
   const systemPrompt = `You are a senior software architect performing structured feature extraction for a software project. Your output feeds directly into an AI-driven code generation pipeline, so it must be precise, complete, and architecturally sound.
 
-Work through FIVE mandatory steps in order:
+Work through the mandatory steps in order:
+
+STEP 0 — PRODUCT CATEGORY & COMPLETENESS CHECK
+First identify what KIND of product this is (e.g. marketplace, booking platform, social app, SaaS dashboard, e-commerce store, blog/CMS, developer tool). Then judge how detailed the description is:
+- If the description already names concrete features, extract those and add the implicit ones they require.
+- If the description is VAGUE and names few or no features, you MUST infer the standard, expected feature set that comparable, successful real-world products in this exact category ship. Draw on your knowledge of how such products are actually built. Mark these inferred features with priority reflecting how essential they are, and treat them as "implicit". Never return a single generic "core feature" — a real product in this category has a known baseline of features, so produce it.
+The user must never leave this step with an empty or near-empty feature list just because they wrote a short description.
 
 STEP 1 — PROJECT ANALYSIS
 Read the description carefully. Identify:
@@ -528,7 +534,9 @@ Project Type: ${projectType}
 
 Features the user already has (DO NOT duplicate these): ${existingFeatures.length > 0 ? existingFeatures.join(", ") : "none"}
 
-Suggest 6-12 features in total across all epics. Make every feature specific to THIS project — not generic boilerplate that would apply to any app. Think about what a real architect would scope and sequence for this exact product.`;
+Suggest 6-12 features in total across all epics. Make every feature specific to THIS project — not generic boilerplate that would apply to any app. Think about what a real architect would scope and sequence for this exact product.
+
+If the description above is short or vague, do NOT under-deliver: infer the complete baseline feature set that a real, shipping product in this category is expected to have, so a non-technical user gets a usable starting point without having to think of every feature themselves.`;
 
   try {
     const result = await claudeJson(
