@@ -306,71 +306,71 @@ export function <ComponentName>({ title, items, onAction, className }: <Componen
 - [ ] No direct SDK imports — data comes via props or hooks
 - [ ] \`className\` prop for style customization
 - [ ] Accessible: proper ARIA labels, keyboard navigation
-`,
+`;
 
-    "templates/api-route-template.md": `# API Route Template — ${spec.projectName}
+    templates["templates/hook-template.md"] = `# Custom Hook Template — ${spec.projectName}
 
-> Use this template every time you create a new API endpoint.
+> Use this template for data-fetching and reusable logic hooks.
 
 ## File Naming
 
-${isNextjs ? `\`src/app/api/<resource>/route.ts\` — Next.js App Router convention.` : `\`src/routes/<resource>.ts\` — one route file per resource.`}
+\`src/hooks/use<Resource>.ts\` — camelCase with \`use\` prefix.
 
 ## Structure
 
 \`\`\`typescript
-${isNextjs ? `import { NextRequest, NextResponse } from "next/server";` : `// Import your framework's request/response types`}
-import { z } from "zod"; // or your validation library
+import { useState, useEffect, useCallback } from "react";
 import { <resourceService> } from "@/services/<resource>";
 
-// 1. Define input schema at the top
-const createSchema = z.object({
-  name: z.string().min(1).max(100),
-  email: z.string().email(),
-});
+interface Use<Resource>Result {
+  data: <Resource>[] | null;
+  error: string | null;
+  loading: boolean;
+  refetch: () => void;
+}
 
-// 2. Export the HTTP method handler
-export async function POST(request: ${isNextjs ? "NextRequest" : "Request"}) {
-  try {
-    // 3. Parse and validate input
-    const body = await request.json();
-    const validated = createSchema.safeParse(body);
+export function use<Resource>(filters?: Filters): Use<Resource>Result {
+  const [data, setData] = useState<<Resource>[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-    if (!validated.success) {
-      return ${isNextjs ? "NextResponse.json" : "Response.json"}(
-        { error: "Validation failed", details: validated.error.flatten() },
-        { status: 400 }
-      );
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await <resourceService>.list(filters);
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setLoading(false);
     }
+  }, [filters]);
 
-    // 4. Delegate to the service layer (NEVER import SDKs here)
-    const result = await <resourceService>.create(validated.data);
+  useEffect(() => {
+    fetch();
+    // Clean up subscriptions if applicable
+    return () => { /* cleanup */ };
+  }, [fetch]);
 
-    // 5. Return typed response
-    return ${isNextjs ? "NextResponse.json" : "Response.json"}(result, { status: 201 });
-
-  } catch (error) {
-    // 6. Catch and categorize errors
-    if (error instanceof AuthError) {
-      return ${isNextjs ? "NextResponse.json" : "Response.json"}({ error: "Unauthorized" }, { status: 401 });
-    }
-    console.error("[API] POST /<resource> failed:", error);
-    return ${isNextjs ? "NextResponse.json" : "Response.json"}({ error: "Internal server error" }, { status: 500 });
-  }
+  return { data, error, loading, refetch: fetch };
 }
 \`\`\`
 
 ## Checklist
 
-- [ ] Input validated with a schema before touching any service
-- [ ] All SDK calls go through service modules — never imported directly
-- [ ] Error responses include a category (validation, auth, not-found, server)
-- [ ] Errors are logged with context (endpoint, operation, error type)
-- [ ] Response types are consistent across all endpoints
-- [ ] Auth/permission check happens before any business logic
-`,
+- [ ] Returns \`{ data, error, loading }\` — always all three
+- [ ] Fetches via the service layer only — never imports SDKs directly
+- [ ] Cleans up subscriptions/listeners on unmount
+- [ ] Contains no JSX — hooks are logic-only
+- [ ] Handles all async states (loading, success, error)
+- [ ] Uses \`useCallback\` for stable function references
+`;
+  }
 
-    "templates/store-template.md": `# Store Template — ${spec.projectName}
+  // ── State store template: only when a UI + state library exist ─────────────
+  if (paradigm.hasUI) {
+    templates["templates/store-template.md"] = `# Store Template — ${spec.projectName}
 
 > Use this template for client-side state management with **${state}**.
 
@@ -442,66 +442,132 @@ export const useTodoStore = create<TodoStore>((set) => ({
 - **Server data in the data layer** — fetched via hooks/services, not stored globally.
 - **Actions inside the store** — never define state mutations outside the store.
 - **Derive, don't duplicate** — use selectors for computed values.
-`,
+`;
+  }
 
-    "templates/hook-template.md": `# Custom Hook Template — ${spec.projectName}
+  // ── HTTP route template: only for projects with an HTTP server ─────────────
+  if (paradigm.hasHttpServer) {
+    templates["templates/api-route-template.md"] = `# API Route Template — ${spec.projectName}
 
-> Use this template for data-fetching and reusable logic hooks.
+> Use this template every time you create a new API endpoint.
 
 ## File Naming
 
-\`src/hooks/use<Resource>.ts\` — camelCase with \`use\` prefix.
+${isNextjs ? `\`src/app/api/<resource>/route.ts\` — Next.js App Router convention.` : `\`src/routes/<resource>.ts\` — one route file per resource.`}
 
 ## Structure
 
 \`\`\`typescript
-import { useState, useEffect, useCallback } from "react";
+${isNextjs ? `import { NextRequest, NextResponse } from "next/server";` : `// Import your framework's request/response types`}
+import { z } from "zod"; // or your validation library
 import { <resourceService> } from "@/services/<resource>";
 
-interface Use<Resource>Result {
-  data: <Resource>[] | null;
-  error: string | null;
-  loading: boolean;
-  refetch: () => void;
-}
+// 1. Define input schema at the top
+const createSchema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email(),
+});
 
-export function use<Resource>(filters?: Filters): Use<Resource>Result {
-  const [data, setData] = useState<<Resource>[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+// 2. Export the HTTP method handler
+export async function POST(request: ${isNextjs ? "NextRequest" : "Request"}) {
+  try {
+    // 3. Parse and validate input
+    const body = await request.json();
+    const validated = createSchema.safeParse(body);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await <resourceService>.list(filters);
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
+    if (!validated.success) {
+      return ${isNextjs ? "NextResponse.json" : "Response.json"}(
+        { error: "Validation failed", details: validated.error.flatten() },
+        { status: 400 }
+      );
     }
-  }, [filters]);
 
-  useEffect(() => {
-    fetch();
-    // Clean up subscriptions if applicable
-    return () => { /* cleanup */ };
-  }, [fetch]);
+    // 4. Delegate to the service layer (NEVER import SDKs here)
+    const result = await <resourceService>.create(validated.data);
 
-  return { data, error, loading, refetch: fetch };
+    // 5. Return typed response
+    return ${isNextjs ? "NextResponse.json" : "Response.json"}(result, { status: 201 });
+
+  } catch (error) {
+    // 6. Catch and categorize errors
+    if (error instanceof AuthError) {
+      return ${isNextjs ? "NextResponse.json" : "Response.json"}({ error: "Unauthorized" }, { status: 401 });
+    }
+    console.error("[API] POST /<resource> failed:", error);
+    return ${isNextjs ? "NextResponse.json" : "Response.json"}({ error: "Internal server error" }, { status: 500 });
+  }
 }
 \`\`\`
 
 ## Checklist
 
-- [ ] Returns \`{ data, error, loading }\` — always all three
-- [ ] Fetches via the service layer only — never imports SDKs directly
-- [ ] Cleans up subscriptions/listeners on unmount
-- [ ] Contains no JSX — hooks are logic-only
-- [ ] Handles all async states (loading, success, error)
-- [ ] Uses \`useCallback\` for stable function references
-`,
+- [ ] Input validated with a schema before touching any service
+- [ ] All SDK calls go through service modules — never imported directly
+- [ ] Error responses include a category (validation, auth, not-found, server)
+- [ ] Errors are logged with context (endpoint, operation, error type)
+- [ ] Response types are consistent across all endpoints
+- [ ] Auth/permission check happens before any business logic
+`;
+  }
+
+  // ── CLI command template: only for command-line tools ──────────────────────
+  if (paradigm.isCli) {
+    templates["templates/command-template.md"] = `# CLI Command Template — ${spec.projectName}
+
+> Use this template every time you add a new command to the CLI.
+
+## File Naming
+
+\`src/commands/<command>.ts\` — one file per command, kebab-case.
+
+## Structure
+
+\`\`\`typescript
+// A command is a thin layer: parse args, call the service/core layer,
+// format output. It NEVER contains business logic itself.
+import { <resourceService> } from "@/services/<resource>";
+
+export interface <Command>Options {
+  input: string;
+  json?: boolean;
+  verbose?: boolean;
+}
+
+export async function run<Command>(options: <Command>Options): Promise<number> {
+  try {
+    const result = await <resourceService>.execute(options.input);
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\\n");
+    } else {
+      process.stdout.write(formatHuman(result) + "\\n");
+    }
+    return 0; // exit code — success
+  } catch (error) {
+    process.stderr.write(
+      \`Error: \${error instanceof Error ? error.message : String(error)}\\n\`,
+    );
+    return 1; // exit code — failure
+  }
+}
+
+function formatHuman(result: unknown): string {
+  // Human-readable, aligned output. Keep machine output behind --json.
+  return String(result);
+}
+\`\`\`
+
+## Checklist
+
+- [ ] Command parses and validates its arguments before doing work
+- [ ] All business logic lives in a service/core module, not the command
+- [ ] Writes machine-readable output to stdout only when \`--json\` is passed
+- [ ] Writes errors to stderr and returns a non-zero exit code on failure
+- [ ] No UI, no HTTP, no browser APIs — this is a terminal program
+- [ ] Every command has a \`--help\` description
+`;
+  }
+
 
     "templates/service-template.md": `# Service Template — ${spec.projectName}
 
