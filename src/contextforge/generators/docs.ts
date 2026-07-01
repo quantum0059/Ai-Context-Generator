@@ -1,6 +1,7 @@
 import { registryByName } from "../registry";
 import type { PackageFiles, PackageMeta, ProjectSpec } from "../../types/projectspec";
 import { buildConstraintBlock, lockedEntries, slugify, detectPrimaryEcosystem, isNonJsEcosystem } from "./shared";
+import { detectPlatformParadigm } from "./platform";
 import { claudeText, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 
@@ -229,8 +230,17 @@ export function generateTemplates(spec: ProjectSpec): PackageFiles {
   const isReact = framework.toLowerCase().includes("next") || framework.toLowerCase().includes("react") || framework.toLowerCase().includes("expo");
   const isNextjs = framework.toLowerCase().includes("next");
 
-  return {
-    "templates/component-template.md": `# Component Template — ${spec.projectName}
+  // Platform paradigm decides which templates are even valid. Historically
+  // every project got React component/hook/store + API-route templates, which
+  // derailed CLI and backend-only projects. We now emit only the templates
+  // that match the project's paradigm.
+  const paradigm = detectPlatformParadigm(spec);
+
+  const templates: PackageFiles = {};
+
+  // ── UI templates: only for projects that render a GUI ──────────────────────
+  if (paradigm.hasUI) {
+    templates["templates/component-template.md"] = `# Component Template — ${spec.projectName}
 
 > Use this template every time you create a new UI component.
 
