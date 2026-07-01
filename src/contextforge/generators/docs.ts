@@ -631,9 +631,9 @@ function mapToDomain(raw: ExternalSdkType): <Resource> {
 2. **Return domain types** — never leak raw SDK response shapes.
 3. **Typed errors** — throw specific error classes, not generic \`Error\`.
 4. **Single responsibility** — one service per external integration.
-`,
+`;
 
-    "templates/repository-template.md": `# Repository Template — ${spec.projectName}
+  templates["templates/repository-template.md"] = `# Repository Template — ${spec.projectName}
 
 > Repositories abstract persistence behind a clean interface using **${db}**.
 
@@ -692,9 +692,9 @@ function mapToRow(resource: <Resource>): DbRow { /* ... */ }
 - Queries map rows/documents to domain types.
 - No SQL or database-specific types leak past the repository boundary.
 - Use parameterized queries — never concatenate user input into SQL.
-`,
+`;
 
-    "templates/test-template.md": `# Test Template — ${spec.projectName}
+  templates["templates/test-template.md"] = `# Test Template — ${spec.projectName}
 
 > Every public function gets at least one happy-path and one failure-path test.
 
@@ -765,8 +765,9 @@ describe("createTodo", () => {
 - [ ] Tests are independent — no shared mutable state between tests
 - [ ] Descriptive test names: "creates a todo and returns the domain object"
 - [ ] \`beforeEach\` clears mocks to prevent test pollution
-`,
-  };
+`;
+
+  return templates;
 }
 
 export async function generateSetup(spec: ProjectSpec, sharedContext: string = ''): Promise<PackageFiles> {
