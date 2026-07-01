@@ -185,6 +185,87 @@ function heuristicFeatureAspects(spec: ProjectSpec, feature: string): Aspect[] {
   ];
 }
 
+// ─── Per-feature requirement context (from the extraction pipeline) ──────────
+
+/**
+ * Pulls the requirement signal already computed upstream (by the
+ * requirement-extractor and feature-extraction pipelines) for THIS feature and
+ * formats it into a markdown block. Feeding these real acceptance criteria,
+ * edge cases, and domain entities into the implementation prompt is what makes
+ * the generated instructions project-specific and hard to get wrong — the
+ * agent is told exactly what "done" means and exactly what must not break.
+ *
+ * Returns an empty string when no structured requirements are available so the
+ * prompt degrades gracefully to its generic sections.
+ */
+function buildFeatureRequirementContext(spec: ProjectSpec, feature: string): string {
+  const req = spec.architecturalRequirements;
+  if (!req) return "";
+
+  const featureText = feature.toLowerCase();
+  const words = featureText.split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+  const matches = (haystack: string): boolean => {
+    const h = haystack.toLowerCase();
+    return words.some((w) => h.includes(w));
+  };
+
+  const sections: string[] = [];
+
+  // Functional requirements that relate to this feature.
+  const relatedFunctional = (req.functional ?? []).filter(
+    (fr) => matches(fr.title) || matches(fr.description),
+  );
+  if (relatedFunctional.length > 0) {
+    sections.push(
+      "### Requirements This Aspect Must Satisfy\n" +
+        relatedFunctional
+          .map(
+            (fr) =>
+              `- **${fr.id} (${fr.priority}${fr.type === "implicit" ? ", implicit" : ""}):** ${fr.title} — ${fr.description}`,
+          )
+          .join("\n"),
+    );
+  }
+
+  // Edge cases relevant to this feature (or universally important categories).
+  const relatedEdgeCases = (req.edgeCases ?? []).filter(
+    (ec) =>
+      matches(ec.scenario) ||
+      matches(ec.expectedBehaviour) ||
+      ["input-validation", "data", "auth", "network"].includes(ec.category),
+  );
+  if (relatedEdgeCases.length > 0) {
+    sections.push(
+      "### Edge Cases That MUST Be Handled\n" +
+        "Every one of these must have explicit handling and a test. Silent failure is a defect.\n" +
+        relatedEdgeCases
+          .slice(0, 8)
+          .map((ec) => `- **${ec.category}:** When ${ec.scenario} → ${ec.expectedBehaviour}`)
+          .join("\n"),
+    );
+  }
+
+  // Domain entities this feature likely touches.
+  const relatedEntities = (req.domain?.entities ?? []).filter(
+    (e) => matches(e.name) || matches(e.description),
+  );
+  if (relatedEntities.length > 0) {
+    sections.push(
+      "### Domain Entities In Play\n" +
+        relatedEntities
+          .map(
+            (e) =>
+              `- **${e.name}** (${e.attributes.join(", ")})${e.relatedEntities.length ? ` → related to ${e.relatedEntities.join(", ")}` : ""}`,
+          )
+          .join("\n"),
+    );
+  }
+
+  if (sections.length === 0) return "";
+
+  return `\n## Feature Requirement Context\n\nThe following was extracted from the project's requirement analysis and is specific to this feature. Treat it as authoritative.\n\n${sections.join("\n\n")}\n`;
+}
+
 // ─── Aspect-specific deliverable descriptors ─────────────────────────────────
 
 function getAspectDeliverables(
