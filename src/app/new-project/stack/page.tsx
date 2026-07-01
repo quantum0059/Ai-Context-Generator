@@ -13,11 +13,13 @@ import {
   Mail,
   Palette,
   Search,
+  Layers,
 } from "lucide-react";
 
 import { useWizard } from "../wizard-context";
 import { WizardBreadcrumb } from "@/components/wizard/breadcrumb";
 import { StepIndicator } from "@/components/wizard/step-indicator";
+import { WizardStepHeader } from "@/components/wizard/step-header";
 import { StackCategoryRow } from "@/components/wizard/stack-category-row";
 import {
   SuggestDialog,
@@ -233,18 +235,17 @@ export default function StackPage() {
       <StepIndicator currentStep={3} />
 
       <main className="mx-auto max-w-[680px] px-4 py-10">
-        <div className="text-center">
-          <h1 className="text-[28px] font-bold text-white">Recommended Tech Stack</h1>
-          <p className="mx-auto mt-3 max-w-[520px] text-sm text-[#888]">
-            Based on your description and selected features. The first choice is recommended; use “Suggest for me” to compare alternatives.
+        <WizardStepHeader
+          icon={Layers}
+          title="Recommended Tech Stack"
+          subtitle="Based on your description and selected features. The first choice is recommended; use “Suggest for me” to compare alternatives."
+        />
+        {state.projectType && (
+          <p className="mt-3 text-center text-xs text-[#666]">
+            Architecture: {state.projectType.replaceAll("_", " ")}
+            {state.classificationReason ? ` — ${state.classificationReason}` : ""}
           </p>
-          {state.projectType && (
-            <p className="mt-2 text-xs text-[#666]">
-              Architecture: {state.projectType.replaceAll("_", " ")}
-              {state.classificationReason ? ` — ${state.classificationReason}` : ""}
-            </p>
-          )}
-        </div>
+        )}
 
         {loading && categories.length === 0 && (
           <div className="mt-8 rounded-xl border border-white/[0.08] bg-[#111] p-10 text-center text-sm text-[#888]">
