@@ -1,5 +1,5 @@
 import type { PackageFiles } from "../../types/projectspec";
-import type { AuthResult, GitProvider, Repository } from "./git-provider";
+import type { AuthResult, GitProvider, Repository, TreeEntry } from "./git-provider";
 
 const API = "https://api.github.com";
 
@@ -61,6 +61,35 @@ async function fetchWithRetry(
  * Uses GitHub's OAuth web application flow and REST API v3.
  */
 export class GitHubProvider implements GitProvider {
+  // ---------------------------------------------------------------------------
+  // List repository file tree (recursive, single request)
+  // ---------------------------------------------------------------------------
+
+  async listTree(
+    accessToken: string,
+    repo: string,
+    ref?: string,
+  ): Promise<TreeEntry[]> {
+    const branch = ref ?? "HEAD";
+
+    // Resolve the branch/ref to a commit + tree SHA, then fetch recursively.
+    const treeRes = await fetchWithRetry(
+      `${API}/repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      { headers: headers(accessToken) },
+      "list repository tree",
+    );
+    await assertOk(treeRes, "list repository tree");
+
+    const data = (await treeRes.json()) as {
+      tree?: Array<{ path: string; type: string }>;
+    };
+
+    return (data.tree ?? []).map((e) => ({
+      path: e.path,
+      type: e.type === "tree" ? ("tree" as const) : ("blob" as const),
+    }));
+  }
+
   async authenticate(code: string): Promise<AuthResult> {
     const clientId = process.env.GITHUB_CLIENT_ID;
     const clientSecret = process.env.GITHUB_CLIENT_SECRET;
