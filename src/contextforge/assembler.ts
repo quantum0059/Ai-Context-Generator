@@ -183,7 +183,7 @@ export async function assemblePackage(
     "roadmap.md": generateRoadmap(validated, ordered),
     "resources.md": generateResources(validated),
     "dependency-graph.md": generateDependencyGraph(validated, ordered),
-    "dependency-graph.json": await generateDependencyGraphJson(validated),
+    "dependency-graph.json": await generateDependencyGraphJson(validated, ordered),
     ...promptFiles,
     ...materialFiles,
     ...skillFiles,

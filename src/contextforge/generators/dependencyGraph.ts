@@ -10,8 +10,8 @@ const orderSchema = z.object({
 
 const PRIORITY: Array<{ keywords: string[]; weight: number; reason: string }> = [
   { keywords: ["auth", "login", "signup"], weight: 0, reason: "Most features depend on knowing who the user is." },
-  { keywords: ["profile", "user", "account"], weight: 1, reason: "User data structures build directly on authentication." },
-  { keywords: ["onboard"], weight: 2, reason: "Onboarding requires auth and user profiles to exist." },
+  { keywords: ["profile", "account"], weight: 1, reason: "User profile data builds on the authentication layer." },
+  { keywords: ["onboard"], weight: 2, reason: "Onboarding requires the core user model to exist first." },
   { keywords: ["ai", "chat", "tutor"], weight: 6, reason: "AI features integrate on top of the core experience." },
   { keywords: ["video", "lesson"], weight: 6, reason: "Media features integrate on top of the core experience." },
   { keywords: ["payment", "billing", "subscription"], weight: 8, reason: "Monetization should land after the core product works." },
@@ -88,6 +88,7 @@ ${detail || "_No features were specified in the ProjectSpec._"}
 
 export async function generateDependencyGraphJson(
   spec: ProjectSpec,
+  ordered?: Array<{ feature: string; reason: string }>,
 ): Promise<string> {
   const systemPrompt =
     `${buildConstraintBlock(spec)}You are a technical project manager determining the optimal build order for a software project. Return valid JSON only, no markdown, no code fences.`;
@@ -130,14 +131,32 @@ Rules for determining order:
 - AI features depend on auth and any data storage they use
 - Apply these rules to ${spec.features.join(", ")} specifically`;
 
+  // Build a REAL structured fallback from the same ordering the markdown uses,
+  // so dependency-graph.json can never silently disagree with
+  // dependency-graph.md (previously it emitted empty arrays on any AI failure).
+  const effectiveOrder = ordered ?? heuristicOrder(spec);
+  const orderedNames = effectiveOrder.map((o) => o.feature);
+  const featureDependencies: Record<string, string[]> = {};
+  orderedNames.forEach((name, i) => {
+    featureDependencies[name] = i === 0 ? [] : [orderedNames[i - 1]];
+  });
   const fallback = {
-    buildOrder: [],
-    featureDependencies: {},
-    criticalPath: [],
+    buildOrder: effectiveOrder.map((o, i) => ({
+      phase: i + 1,
+      name: o.feature,
+      features: [o.feature],
+      reason: o.reason,
+      canParallelize: false,
+    })),
+    featureDependencies,
+    criticalPath: orderedNames,
     parallelizableGroups: [],
     foundationRequirements: {
-      mustBuildFirst: [],
-      reason: "No features specified or generation failed",
+      mustBuildFirst: orderedNames.slice(0, 1),
+      reason:
+        orderedNames.length > 0
+          ? `${orderedNames[0]} establishes the foundation the remaining features build on.`
+          : "No features specified.",
     },
   };
 

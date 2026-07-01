@@ -3,6 +3,7 @@ import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { lockedEntries, slugify } from "./shared";
+import { detectPlatformParadigm } from "./platform";
 
 const screensSchema = z.object({
   screens: z
@@ -49,8 +50,7 @@ async function identifyScreens(spec: ProjectSpec): Promise<ScreenInfo[]> {
 }
 
 function heuristicScreens(spec: ProjectSpec): ScreenInfo[] {
-  const isBackendOnly = spec.platform === "backend-only" || spec.platform === "cli";
-  if (isBackendOnly) return [];
+  if (!detectPlatformParadigm(spec).hasUI) return [];
 
   const screens: ScreenInfo[] = [
     {
@@ -439,18 +439,23 @@ Every interactive component MUST implement all applicable states:
 /** Prompt Material System: visual/design context for AI assistants. */
 export async function generatePromptMaterial(spec: ProjectSpec): Promise<PackageFiles> {
   const files: PackageFiles = {};
-  const isBackendOnly = spec.platform === "backend-only" || spec.platform === "cli";
+  const paradigm = detectPlatformParadigm(spec);
 
-  if (!isBackendOnly) {
-    const screens = await identifyScreens(spec);
-    screens.forEach((screen, i) => {
-      const num = String(i + 1).padStart(2, "0");
-      files[`prompt_material/ui-references/${num}-${slugify(screen.name)}.md`] =
-        uiReferenceContent(spec, screen);
-    });
-
-    Object.assign(files, designSystemFiles(spec));
+  // Projects with no GUI (CLI, backend-only) get NO design material at all.
+  // Emitting UI references, wireframes, and design-system tokens for a CLI
+  // was a primary source of hallucinated web concepts in generated packages.
+  if (!paradigm.hasUI) {
+    return files;
   }
+
+  const screens = await identifyScreens(spec);
+  screens.forEach((screen, i) => {
+    const num = String(i + 1).padStart(2, "0");
+    files[`prompt_material/ui-references/${num}-${slugify(screen.name)}.md`] =
+      uiReferenceContent(spec, screen);
+  });
+
+  Object.assign(files, designSystemFiles(spec));
 
   // Wireframes guide
   files["prompt_material/wireframes/README.md"] = `# Wireframes — ${spec.projectName}
