@@ -1,5 +1,5 @@
 import type { PackageFiles } from "../../types/projectspec";
-import type { AuthResult, GitProvider, Repository } from "./git-provider";
+import type { AuthResult, GitProvider, Repository, TreeEntry } from "./git-provider";
 
 const API = "https://gitlab.com/api/v4";
 
@@ -176,6 +176,47 @@ export class GitLabProvider implements GitProvider {
       defaultBranch: p.default_branch ?? "main",
       visibility: normalizeVisibility(p.visibility),
     }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // List repository file tree (recursive, paginated)
+  // ---------------------------------------------------------------------------
+
+  async listTree(
+    accessToken: string,
+    repo: string,
+    ref?: string,
+  ): Promise<TreeEntry[]> {
+    const encodedRepo = encodeURIComponent(repo);
+    const entries: TreeEntry[] = [];
+    const MAX_PAGES = 20; // safety cap: 20 * 100 = 2000 entries
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const qs = new URLSearchParams({
+        recursive: "true",
+        per_page: "100",
+        page: String(page),
+      });
+      if (ref) qs.set("ref", ref);
+
+      const res = await fetchWithRetry(
+        `${API}/projects/${encodedRepo}/repository/tree?${qs}`,
+        { headers: headers(accessToken) },
+        "list repository tree",
+      );
+      await assertOk(res, "list repository tree");
+
+      const batch = (await res.json()) as Array<{ path: string; type: string }>;
+      for (const e of batch) {
+        entries.push({ path: e.path, type: e.type === "tree" ? "tree" : "blob" });
+      }
+
+      // GitLab returns the next page number in a header; stop when a short page
+      // (< per_page) is returned.
+      if (batch.length < 100) break;
+    }
+
+    return entries;
   }
 
   // ---------------------------------------------------------------------------

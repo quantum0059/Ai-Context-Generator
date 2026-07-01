@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -13,12 +13,87 @@ import ReactFlow, {
   useEdgesState,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { Sparkles, Upload } from "lucide-react";
+import { RefreshCw, Sparkles, Upload } from "lucide-react";
 
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { ContextNode } from "@/components/graph/context-node";
 import { LegendPanel } from "@/components/graph/legend-panel";
 import { DependenciesPanel } from "@/components/graph/dependencies-panel";
+
+// ─── Repo tree → graph ────────────────────────────────────────────────────────
+
+interface TreeEntry {
+  path: string;
+  type: "blob" | "tree";
+}
+
+const defaultEdgeStyleTop = {
+  stroke: "rgba(255,255,255,0.20)",
+  strokeWidth: 1.5,
+  strokeDasharray: "5 5",
+};
+const defaultMarkerEndTop = {
+  type: MarkerType.ArrowClosed,
+  color: "rgba(255,255,255,0.30)",
+};
+
+/**
+ * Converts a flat, recursive repo file tree into React Flow nodes/edges laid
+ * out as a directory hierarchy: depth drives the X column, sibling order drives
+ * Y. Directories render as "center"-style nodes, files as default nodes.
+ */
+function treeToGraph(entries: TreeEntry[]): { nodes: Node[]; edges: Edge[] } {
+  const COL_WIDTH = 260;
+  const ROW_HEIGHT = 64;
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  const rowByDepth = new Map<number, number>();
+
+  // Root node.
+  nodes.push({
+    id: "__root__",
+    position: { x: 0, y: 0 },
+    data: { label: "Repository", subtitle: `${entries.length} entries`, variant: "center" },
+    type: "centerNode",
+  });
+
+  // Sort so parents are processed before children and order is stable.
+  const sorted = [...entries].sort((a, b) => a.path.localeCompare(b.path));
+
+  for (const entry of sorted) {
+    const segments = entry.path.split("/");
+    const depth = segments.length; // 1 = top-level
+    const row = rowByDepth.get(depth) ?? 0;
+    rowByDepth.set(depth, row + 1);
+
+    const id = entry.path;
+    const parentId = segments.length > 1 ? segments.slice(0, -1).join("/") : "__root__";
+    const name = segments[segments.length - 1];
+
+    nodes.push({
+      id,
+      position: { x: depth * COL_WIDTH, y: row * ROW_HEIGHT },
+      data: {
+        label: name,
+        subtitle: entry.type === "tree" ? "Folder" : "File",
+        variant: entry.type === "tree" ? "center" : undefined,
+      },
+      type: entry.type === "tree" ? "centerNode" : "defaultNode",
+    });
+
+    edges.push({
+      id: `${parentId}->${id}`,
+      source: parentId,
+      target: id,
+      type: "default",
+      animated: false,
+      style: defaultEdgeStyleTop,
+      markerEnd: defaultMarkerEndTop,
+    });
+  }
+
+  return { nodes, edges };
+}
 
 const nodeTypes = {
   centerNode: ContextNode,
@@ -103,9 +178,68 @@ const initialEdges: Edge[] = [
 ];
 
 export default function ContextMapPage() {
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // ── Repo sync state ───────────────────────────────────────────────────────
+  const [provider, setProvider] = useState<"github" | "gitlab">("github");
+  const [repo, setRepo] = useState("");
+  const [branch, setBranch] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const syncFromRepo = useCallback(async () => {
+    const target = repo.trim();
+    if (!target) {
+      setSyncError("Enter a repository (owner/name for GitHub, path or numeric id for GitLab).");
+      return;
+    }
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const qs = new URLSearchParams({ repo: target });
+      if (branch.trim()) qs.set("ref", branch.trim());
+      const res = await fetch(`/api/git/${provider}/tree?${qs}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to sync repository.");
+      }
+      const entries = (data.tree ?? []) as TreeEntry[];
+      if (entries.length === 0) {
+        throw new Error("The repository tree is empty or the branch was not found.");
+      }
+      const { nodes: nextNodes, edges: nextEdges } = treeToGraph(entries);
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      setSelectedNodeId(null);
+      setLastSynced(new Date());
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "Failed to sync repository.");
+    } finally {
+      setSyncing(false);
+    }
+  }, [provider, repo, branch, setNodes, setEdges]);
+
+  // Auto-refresh: poll the connected repo every 30s while enabled. This is the
+  // practical stand-in for "update when files change" without a webhook backend.
+  useEffect(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (autoRefresh && repo.trim()) {
+      pollRef.current = setInterval(() => {
+        void syncFromRepo();
+      }, 30_000);
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [autoRefresh, repo, syncFromRepo]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -165,11 +299,47 @@ export default function ContextMapPage() {
               Visualize the relationships and dependencies between systems and services.
             </p>
           </div>
-          <div className="flex items-center gap-2.5">
-            <button className="flex items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#111111] px-3.5 py-2 text-[13px] text-white transition-colors hover:bg-[#1a1a1a]">
-              <Sparkles className="size-4 text-white" />
-              View Guides
+          <div className="flex flex-wrap items-center gap-2.5">
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as "github" | "gitlab")}
+              className="h-9 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#111111] px-2.5 text-[13px] text-white outline-none focus:border-white/30"
+              aria-label="Git provider"
+            >
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
+            </select>
+            <input
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && syncFromRepo()}
+              placeholder={provider === "github" ? "owner/name" : "group/project or id"}
+              className="h-9 w-44 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#111111] px-2.5 text-[13px] text-white placeholder:text-[#555] outline-none focus:border-white/30"
+            />
+            <input
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && syncFromRepo()}
+              placeholder="branch (optional)"
+              className="h-9 w-32 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#111111] px-2.5 text-[13px] text-white placeholder:text-[#555] outline-none focus:border-white/30"
+            />
+            <button
+              onClick={syncFromRepo}
+              disabled={syncing}
+              className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-[13px] font-medium text-[#0A0A0A] transition-colors hover:bg-white/90 disabled:opacity-50"
+            >
+              <RefreshCw className={`size-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing…" : "Sync"}
             </button>
+            <label className="flex items-center gap-1.5 text-[12px] text-[#888]">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="size-3.5 accent-white"
+              />
+              Auto
+            </label>
             <button className="flex items-center gap-2 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#111111] px-3.5 py-2 text-[13px] text-white transition-colors hover:bg-[#1a1a1a]">
               <Upload className="size-4 text-white" />
               Export
