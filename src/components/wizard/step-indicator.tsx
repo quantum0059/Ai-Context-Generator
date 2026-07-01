@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STEPS = [
@@ -22,47 +23,61 @@ function stepStatus(stepNumber: number, currentStep: number) {
 }
 
 export function StepIndicator({ currentStep }: StepIndicatorProps) {
+  // Progress track fills from the first to the current step.
+  const progress = ((currentStep - 1) / (STEPS.length - 1)) * 100;
+
   return (
-    <div className="border-b border-white/[0.08] bg-[#0A0A0A] px-4 py-6 sm:px-6">
-      <div className="mx-auto flex max-w-3xl items-start justify-center">
-        {STEPS.map((step, index) => {
-          const status = stepStatus(step.number, currentStep);
+    <div className="border-b border-white/[0.08] bg-gradient-to-b from-[#0C0C0C] to-[#0A0A0A] px-4 py-7 sm:px-6">
+      <div className="mx-auto max-w-3xl">
+        <div className="relative">
+          {/* Background track */}
+          <div className="absolute left-0 right-0 top-4 h-px bg-white/[0.10]" aria-hidden />
+          {/* Filled track */}
+          <div
+            className="absolute left-0 top-4 h-px bg-gradient-to-r from-white/60 to-white transition-all duration-500 ease-out"
+            style={{ width: `${progress}%` }}
+            aria-hidden
+          />
 
-          return (
-            <div key={step.slug} className="flex items-start">
-              <div className="flex flex-col items-center">
-                <div
-                  className={cn(
-                    "flex size-8 items-center justify-center rounded-full text-xs font-medium",
-                    status === "active" && "bg-white text-[#0A0A0A]",
-                    status === "completed" &&
-                      "border border-white text-white",
-                    status === "upcoming" &&
-                      "border border-white/[0.20] text-[#888]",
-                  )}
-                >
-                  {step.number}
-                </div>
-                <span
-                  className={cn(
-                    "mt-2 text-xs",
-                    status === "active"
-                      ? "font-semibold text-white"
-                      : "text-[#888]",
-                  )}
-                >
-                  {step.label}
-                </span>
-              </div>
+          <ol className="relative flex items-start justify-between">
+            {STEPS.map((step) => {
+              const status = stepStatus(step.number, currentStep);
+              return (
+                <li key={step.slug} className="flex flex-1 flex-col items-center">
+                  <div
+                    className={cn(
+                      "flex size-8 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300",
+                      status === "active" &&
+                        "bg-white text-[#0A0A0A] ring-4 ring-white/15 shadow-[0_0_18px_rgba(255,255,255,0.25)]",
+                      status === "completed" &&
+                        "bg-white/10 text-white ring-1 ring-white/40",
+                      status === "upcoming" &&
+                        "bg-[#0A0A0A] text-[#666] ring-1 ring-white/[0.12]",
+                    )}
+                  >
+                    {status === "completed" ? <Check className="size-4" /> : step.number}
+                  </div>
+                  <span
+                    className={cn(
+                      "mt-2.5 text-center text-[11px] transition-colors sm:text-xs",
+                      status === "active"
+                        ? "font-semibold text-white"
+                        : status === "completed"
+                        ? "text-white/70"
+                        : "text-[#666]",
+                    )}
+                  >
+                    {step.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
 
-              {index < STEPS.length - 1 && (
-                <span className="mx-2 mt-3 text-sm text-[#888] sm:mx-4">
-                  →
-                </span>
-              )}
-            </div>
-          );
-        })}
+        <p className="mt-5 text-center text-[11px] font-medium uppercase tracking-widest text-[#555]">
+          Step {currentStep} of {STEPS.length}
+        </p>
       </div>
     </div>
   );
