@@ -219,6 +219,14 @@ export async function assemblePackage(
   const aiEnabled = isClaudeConfigured();
   files['validation-report.md'] = generateValidationReport(validation, aiEnabled);
 
+  // agents.md is the first file an AI agent reads. If the validator found
+  // blocking violations (phantom packages, forbidden imports, wrong test
+  // framework, RLS-in-SQLite), the package must not present itself as clean.
+  // Prepend a prominent banner so the defects are impossible to miss.
+  if (validation.violations.length > 0 && files['agents.md']) {
+    files['agents.md'] = buildViolationBanner(validation.violations) + files['agents.md'];
+  }
+
   console.log("[Generator] 100% complete — Package generation finished.");
   const elapsed = Date.now() - startTime;
   if (elapsed < 15_000 && validated.features.length >= 5) {
