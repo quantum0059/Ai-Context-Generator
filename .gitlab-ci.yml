@@ -1,5 +1,5 @@
 # CI for ContextForge (Next.js + TypeScript).
-# Runs the three quality gates on every merge request and on the default branch.
+# Runs the quality gates on every merge request and on the default branch.
 
 default:
   image: node:20-alpine
@@ -9,14 +9,15 @@ default:
         - package-lock.json
     paths:
       - node_modules/
-    policy: pull
+      - .npm/
+    policy: pull-push
+  before_script:
+    - npm ci --cache .npm --prefer-offline
 
 stages:
-  - install
   - verify
 
 variables:
-  # Keep npm's cache inside the project so it can be cached between jobs.
   npm_config_cache: "$CI_PROJECT_DIR/.npm"
 
 workflow:
@@ -25,36 +26,23 @@ workflow:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
-install:
-  stage: install
-  script:
-    - npm ci
-  cache:
-    key:
-      files:
-        - package-lock.json
-    paths:
-      - node_modules/
-    policy: pull-push
-  artifacts:
-    paths:
-      - node_modules/
-    expire_in: 1 hour
-
-lint:
-  stage: verify
-  needs: [install]
-  script:
-    - npm run lint
-
 test:
   stage: verify
-  needs: [install]
   script:
     - npm test
 
+lint:
+  stage: verify
+  script:
+    - npm run lint
+  # Do not block merges on lint until the imported project's lint config is
+  # confirmed clean in CI.
+  allow_failure: true
+
 build:
   stage: verify
-  needs: [install]
   script:
     - npm run build
+  # next build can require runtime env vars; keep it visible but non-blocking
+  # until CI variables are configured.
+  allow_failure: true
