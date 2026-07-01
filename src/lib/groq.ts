@@ -78,8 +78,15 @@ export async function groqJson<T>(
         }),
       });
       if (!res.ok) {
-        if (res.status === 429 && activeModel === GROQ_DEFAULT_MODEL && activeModel !== MODELS.CONTENT_FALLBACK) {
-          console.warn(`[Generator] ${GROQ_DEFAULT_MODEL} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
+        // Fall back to the secondary model on rate limits (429) AND on
+        // model/availability errors (400/404). A bad or deprecated model ID
+        // must degrade gracefully instead of silently killing AI generation.
+        const shouldFallback =
+          (res.status === 429 || res.status === 400 || res.status === 404) &&
+          activeModel === GROQ_DEFAULT_MODEL &&
+          activeModel !== MODELS.CONTENT_FALLBACK;
+        if (shouldFallback) {
+          console.warn(`[Generator] ${GROQ_DEFAULT_MODEL} unavailable (status ${res.status}); retrying with ${MODELS.CONTENT_FALLBACK}`);
           return groqJson(systemPrompt, userPrompt, schema, 0, MODELS.CONTENT_FALLBACK);
         }
         throw new Error(`Groq API error: ${res.status}`);
@@ -134,8 +141,12 @@ export async function groqText(
         }),
       });
       if (!res.ok) {
-        if (res.status === 429 && activeModel === GROQ_DEFAULT_MODEL && activeModel !== MODELS.CONTENT_FALLBACK) {
-          console.warn(`[Generator] ${GROQ_DEFAULT_MODEL} rate limited; retrying with ${MODELS.CONTENT_FALLBACK}`);
+        const shouldFallback =
+          (res.status === 429 || res.status === 400 || res.status === 404) &&
+          activeModel === GROQ_DEFAULT_MODEL &&
+          activeModel !== MODELS.CONTENT_FALLBACK;
+        if (shouldFallback) {
+          console.warn(`[Generator] ${GROQ_DEFAULT_MODEL} unavailable (status ${res.status}); retrying with ${MODELS.CONTENT_FALLBACK}`);
           return groqText(systemPrompt, userPrompt, 0, MODELS.CONTENT_FALLBACK);
         }
         throw new Error(`Groq API error: ${res.status}`);
