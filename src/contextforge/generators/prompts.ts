@@ -533,6 +533,7 @@ function richFallbackPrompt(
   const testCode = getAspectTestCode(aspect.aspect, feature, spec);
   const snippets = buildTechCodeSnippets(spec);
   const schema = buildSharedDatabaseSchema(spec);
+  const requirementContext = buildFeatureRequirementContext(spec, feature);
 
   const stackTable = lockedEntries(spec)
     .map(([cat, e]) => `| ${cat} | ${e.value} |`)
@@ -577,7 +578,7 @@ ${deliverables.description}
 | Category | Technology |
 |---|---|
 ${stackTable}
-
+${requirementContext}
 ---
 
 ## Required File Structure
@@ -611,7 +612,35 @@ ${criteria.map((c) => `- [ ] ${c}`).join('\n')}
 
 ---
 
+## Definition of Done
+
+This aspect is complete ONLY when every one of the following is true. If any is false, the work is not done.
+
+- [ ] Every file listed in **Required File Structure** exists at its exact path and compiles.
+- [ ] Every item in **Acceptance Criteria** is satisfied.
+- [ ] Every scenario in **Edge Cases That MUST Be Handled** has explicit handling and a corresponding test (when this section is present).
+- [ ] No technology outside the locked stack is imported anywhere.
+- [ ] All inputs crossing a trust boundary are validated before use.
+- [ ] Every async operation has explicit error handling — no unhandled rejections, no swallowed errors.
+- [ ] The test file runs and all tests pass with the project's runner.
+
+---
+
+## Self-Verification (run before you report done)
+
+After implementing, verify your own output by answering each question. If any answer is "no", fix it before finishing:
+
+1. Did I create files at the EXACT paths above, and only those paths?
+2. Did I import ONLY packages from the locked stack table?
+3. For every edge case listed, can I point to the line that handles it and the test that proves it?
+4. Does every exported function have an explicit return type and no \`any\`?
+5. Would another feature depending on this one find the exports and types it expects?
+
+---
+
 ## Test Cases
+
+Implement these tests and ensure they pass. Add one test per listed edge case.
 
 \`\`\`typescript
 ${testCode}
