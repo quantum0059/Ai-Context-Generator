@@ -659,20 +659,24 @@ async function generateAspectPrompt(
     const constraintBlock = buildConstraintBlock(spec);
     const snippets = buildTechCodeSnippets(spec);
     const schema = buildSharedDatabaseSchema(spec);
+    const requirementContext = buildFeatureRequirementContext(spec, feature);
 
-    const systemPrompt = `${constraintBlock}You are a senior engineer writing implementation instructions for an AI coding assistant. The AI will read ONLY this file before implementing this aspect. Be so specific that the AI produces correct code on the first attempt.
+    const systemPrompt = `${constraintBlock}You are a Principal Engineer writing an implementation brief for an AI coding assistant. The assistant will read ONLY this file before implementing this aspect — it has no other context. Your brief must be so precise, complete, and unambiguous that a correct implementation is the ONLY reasonable output. Leave no decision to guesswork.
 
 Rules:
-- Include exact file paths to create or modify
+- Include exact file paths to create or modify (every path starts with src/)
 - Include the complete TypeScript interface/type definitions the AI must use
-- Include the exact function signatures to implement
-- Include real example code for the most complex part
+- Include the exact function signatures to implement, with explicit return types
+- Include real example code for the most complex part — no pseudo-code, no placeholders
+- Every edge case provided in the requirement context MUST appear with explicit expected handling AND a matching test
 - Include explicit acceptance criteria as a checklist
-- Include the exact test cases that prove it works
+- Include a "Definition of Done" and a "Self-Verification" checklist the assistant must satisfy before reporting completion
+- Include the exact test cases that prove it works, including one test per edge case
 - Include what NOT to do for this specific stack
 - Never say 'implement X' without showing what X looks like for this project's stack
 - Say "Required File Structure" not "Suggested File Structure"
-${sharedContext}
+- Do NOT emit TODO/FIXME/'your code here' or any placeholder — such output is an automatic failure
+${requirementContext}${sharedContext}
 ${snippets}
 ${schema}`;
 
@@ -717,10 +721,16 @@ Include one real TypeScript code snippet showing the correct pattern.
 List specific anti-patterns for this exact stack.
 
 ## Acceptance Criteria
-Include at least 3 specific, testable checkbox items using - [ ].
+Include at least 3 specific, testable checkbox items using - [ ]. If a Feature Requirement Context was provided in the system prompt, every listed requirement and edge case must be reflected here.
+
+## Definition of Done
+A checklist (- [ ]) that is true only when the aspect is fully complete: all files compile, all acceptance criteria met, every edge case handled and tested, only locked-stack imports used, all inputs validated, all async paths have error handling.
+
+## Self-Verification
+3-5 questions the assistant must answer "yes" to before reporting done (correct paths, only locked-stack imports, every edge case handled and tested, explicit return types with no any, exports usable by dependent features).
 
 ## Test Cases
-Include real test code without placeholder assertions.`;
+Include real test code without placeholder assertions, with one test per edge case listed above.`;
 
     try {
       const content = await claudeText(systemPrompt, userPrompt, 1, MODELS.CONTENT);
