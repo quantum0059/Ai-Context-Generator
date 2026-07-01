@@ -2,13 +2,14 @@ export const MODELS = {
   // Fast classification tasks only
   FAST: 'llama-3.1-8b-instant',
 
-  // Primary content generation
-  // qwen3-32b is being deprecated on Groq —
-  // qwen3.6-27b is the recommended replacement
-  CONTENT: 'qwen/qwen3.6-27b',
+  // Primary content generation.
+  // NOTE: the previous value 'qwen/qwen3.6-27b' is NOT a valid Groq model ID,
+  // which caused every content call to fail and silently fall back to
+  // heuristics. Use a known-good Groq production model.
+  CONTENT: 'llama-3.3-70b-versatile',
 
-  // Fallback if CONTENT hits rate limits
-  CONTENT_FALLBACK: 'llama-3.3-70b-versatile',
+  // Fallback if CONTENT hits rate limits or is unavailable
+  CONTENT_FALLBACK: 'llama-3.1-8b-instant',
 
   // Complex reasoning: ADRs, dependency analysis,
   // constraint conflict detection
