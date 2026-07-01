@@ -26,6 +26,15 @@ create table if not exists subscriptions (
   created_at timestamptz not null default now()
 );
 
+-- Processed Stripe webhook events (idempotency / replay protection).
+-- The webhook handler records every event id it has applied so Stripe's
+-- at-least-once redelivery cannot double-apply a subscription change.
+create table if not exists processed_stripe_events (
+  event_id text primary key,
+  event_type text not null,
+  created_at timestamptz not null default now()
+);
+
 -- Indexes for performance
 create index if not exists idx_context_packages_user_id on context_packages(user_id);
 create index if not exists idx_context_packages_created_at on context_packages(created_at);
@@ -34,6 +43,11 @@ create index if not exists idx_subscriptions_status on subscriptions(status);
 -- Row Level Security (RLS) policies
 alter table context_packages enable row level security;
 alter table subscriptions enable row level security;
+
+-- processed_stripe_events is written only by the server (service role) from the
+-- Stripe webhook and is never read by end users, so RLS stays enabled with no
+-- public policy (deny-by-default for anon/authenticated clients).
+alter table processed_stripe_events enable row level security;
 
 -- Users can only see their own packages
 create policy "Users can view own packages"
