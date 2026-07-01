@@ -2,6 +2,7 @@ import { z } from "zod";
 import { claudeJson, claudeText, isClaudeConfigured } from "../../lib/claude";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { buildConstraintBlock, buildTechCodeSnippets, buildSharedDatabaseSchema, lockedEntries, slugify } from "./shared";
+import { detectPlatformParadigm } from "./platform";
 import { MODELS } from "../../lib/ai-models";
 
 const aspectSchema = z.object({
@@ -77,33 +78,48 @@ function ensureRequiredAspects(feature: string, aspects: Aspect[]): Aspect[] {
  * ever being generated for offline, no-backend projects.
  */
 function filterAspectsAgainstConstraints(aspects: Aspect[], spec: ProjectSpec): Aspect[] {
-  const isOffline = spec.constraints?.technical?.mustBeOffline;
+  const paradigm = detectPlatformParadigm(spec);
 
-  const hasHttpServer = Object.values(spec.stack ?? {}).some((v) =>
-    ['express', 'fastify', 'hono', 'nestjs'].some((f) =>
-      v?.value?.toLowerCase().includes(f)
-    )
-  );
+  const filtered = aspects.filter((aspect) => {
+    const key = aspect.aspect.toLowerCase();
 
-  return aspects.filter((aspect) => {
     // Remove auth aspects for offline single-user apps
-    if (isOffline && aspect.aspect.includes('authentication')) {
+    if (paradigm.isOffline && key.includes('authentication')) {
       console.log(
         `[AspectFilter] Removed ${aspect.aspect} — auth not valid for offline app`
       );
       return false;
     }
 
-    // Remove API route aspects when no HTTP server is in the stack
-    if (aspect.aspect === 'api-routes' && !hasHttpServer) {
+    // Remove UI aspects for projects that render no GUI (CLI, backend-only).
+    // This is the key gate that stops a node-cli tool from receiving React
+    // component build prompts it can never use.
+    if (!paradigm.hasUI && /ui|component|frontend|client|screen/.test(key)) {
       console.log(
-        `[AspectFilter] Removed api-routes — no HTTP server in stack`
+        `[AspectFilter] Removed ${aspect.aspect} — platform "${spec.platform}" has no UI`
+      );
+      return false;
+    }
+
+    // Remove API route aspects when there is no HTTP server (CLI, offline, or
+    // no HTTP framework in the stack).
+    if (/api-routes|api|endpoint|route|server/.test(key) && !paradigm.hasHttpServer) {
+      console.log(
+        `[AspectFilter] Removed ${aspect.aspect} — no HTTP server for platform "${spec.platform}"`
       );
       return false;
     }
 
     return true;
   });
+
+  // Never return an empty aspect list — if platform filtering stripped
+  // everything, fall back to a platform-appropriate core aspect so the
+  // feature still gets an actionable build prompt.
+  if (filtered.length === 0) {
+    return heuristicFeatureAspects(spec, aspects[0]?.title ?? 'core');
+  }
+  return filtered;
 }
 
 export function isPromptContentValid(content: string, featureName: string, aspect: string): boolean {
@@ -129,15 +145,43 @@ export function isPromptContentValid(content: string, featureName: string, aspec
 }
 
 function heuristicFeatureAspects(spec: ProjectSpec, feature: string): Aspect[] {
-  const isBackendOnly = spec.platform === "backend-only" || spec.platform === "cli";
-  if (isBackendOnly) {
+  const paradigm = detectPlatformParadigm(spec);
+
+  // CLI tools: commands + the core service/logic layer. No UI, no HTTP.
+  if (paradigm.isCli) {
     return [
-      { aspect: "api-routes", title: `Build API routes for ${feature}`, description: "Endpoints and business logic" }
+      { aspect: "cli-commands", title: `Build CLI commands for ${feature}`, description: "Command definitions, argument parsing, and output formatting" },
+      { aspect: "core-logic", title: `Build core logic for ${feature}`, description: "The service/domain layer that the commands call into" },
     ];
   }
+
+  // Backend / API-only services: HTTP routes + service layer, no UI.
+  if (paradigm.isBackendOnly && paradigm.hasHttpServer) {
+    return [
+      { aspect: "api-routes", title: `Build API routes for ${feature}`, description: "Endpoints and business logic" },
+      { aspect: "core-logic", title: `Build core logic for ${feature}`, description: "Service layer and domain types" },
+    ];
+  }
+
+  // Backend-only with no HTTP surface (e.g. a worker/daemon): logic only.
+  if (paradigm.isBackendOnly || (!paradigm.hasUI && !paradigm.hasHttpServer)) {
+    return [
+      { aspect: "core-logic", title: `Build core logic for ${feature}`, description: "Service/domain layer and data flow" },
+    ];
+  }
+
+  // UI platforms with a backend (typical web/mobile app): UI + API.
+  if (paradigm.hasHttpServer) {
+    return [
+      { aspect: "ui-components", title: `Build UI components for ${feature}`, description: "User interface and state" },
+      { aspect: "api-routes", title: `Build API routes for ${feature}`, description: "Endpoints and integration" },
+    ];
+  }
+
+  // UI platform with no HTTP server (e.g. offline desktop/mobile app): UI + local logic.
   return [
     { aspect: "ui-components", title: `Build UI components for ${feature}`, description: "User interface and state" },
-    { aspect: "api-routes", title: `Build API routes for ${feature}`, description: "Endpoints and integration" }
+    { aspect: "core-logic", title: `Build core logic for ${feature}`, description: "Local data/service layer (no network)" },
   ];
 }
 
