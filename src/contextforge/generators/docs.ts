@@ -569,7 +569,7 @@ function formatHuman(result: unknown): string {
   }
 
 
-    "templates/service-template.md": `# Service Template — ${spec.projectName}
+  templates["templates/service-template.md"] = `# Service Template — ${spec.projectName}
 
 > The service layer is the **ONLY** place external SDKs are imported.
 

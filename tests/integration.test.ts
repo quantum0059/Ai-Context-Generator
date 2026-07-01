@@ -172,15 +172,15 @@ describe("Rate Limiting", () => {
   it("should block requests over limit", async () => {
     const { checkRateLimit } = await import("../src/lib/rateLimit");
 
-    const identifier = "rate-limit-test-user";
+    const identifier = `rate-limit-test-${Date.now()}`;
     const endpoint = "/api/contextforge/generate";
 
-    // Exhaust the limit (5 requests per minute)
-    for (let i = 0; i < 5; i++) {
+    // Exhaust the limit (30 requests per minute for /generate)
+    for (let i = 0; i < 30; i++) {
       checkRateLimit(identifier, endpoint);
     }
 
-    // 6th request should be blocked
+    // 31st request should be blocked
     const result = checkRateLimit(identifier, endpoint);
     expect(result.allowed).toBe(false);
     expect(result.remaining).toBe(0);

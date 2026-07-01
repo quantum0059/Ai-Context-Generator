@@ -95,7 +95,7 @@ function heuristicProjectType(draft: DraftInput): string {
   const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
   if (/\b(cli|command[- ]line|terminal tool)\b/.test(text)) return "CLI_TOOL";
   if (/\b(library|sdk|npm package|developer package)\b/.test(text)) return "LIBRARY_OR_SDK";
-  if (/\b(headless|engine|parser|compiler|generator|processing pipeline)\b/.test(text)) return "HEADLESS_ENGINE";
+  if (/\b(headless|engine|parser|parses|compiler|compiles|generator|generates|processing pipeline|processes|analyzer|analyzes|mentor|builds? .{0,20} files?|emits?)\b/.test(text)) return "HEADLESS_ENGINE";
   if (/\b(backend api|rest api|graphql api|api service|microservice)\b/.test(text)) return "BACKEND_API";
   return "UI_APPLICATION";
 }
@@ -392,6 +392,34 @@ Rules for this specific project:
       }
   }
   const projectType = heuristicProjectType(draft);
+
+  // Offline code analysis tools (AST parsing, complexity, algorithms) get a
+  // purpose-built category set with custom tooling suggestions. This was
+  // previously only reachable via the AI path; now it's available in the
+  // heuristic fallback so offline-first projects get actionable categories
+  // even without an AI provider key.
+  //
+  // We require BOTH an AST/parsing signal AND at least one higher-level
+  // domain concern (complexity, algorithm, mentor, skill) to avoid false
+  // positives on simpler projects that merely mention "parses source code".
+  const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+  const isOfflineCodeAnalysis =
+    projectType === "HEADLESS_ENGINE" &&
+    /\b(offline|no internet|without internet|local)\b/.test(text) &&
+    /\b(ast|parser?s?|source code)\b/.test(text) &&
+    /\b(complexity|algorithm|mentor|skill|recognition)\b/.test(text);
+
+  if (isOfflineCodeAnalysis) {
+    const categories = offlineCodeAnalysisCategories(draft);
+    return {
+      requiredCategories: categories.map((c) => c.key),
+      fullCategories: categories,
+      engine: "heuristic",
+      projectType,
+      classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} with offline code analysis specialization from the project description.`,
+    };
+  }
+
   const requiredCategories = heuristicCategories(draft, projectType);
   // Even an unusual library needs at least one explicit technical concern.
   if (requiredCategories.length === 0) requiredCategories.push("packageTooling");

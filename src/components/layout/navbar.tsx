@@ -9,11 +9,9 @@ import { useAuth, SignInButton, SignOutButton, SignUpButton } from "@clerk/nextj
 import { Button } from "@/components/ui/button";
 import {
   NavigationMenu,
-  NavigationMenuContent,
   NavigationMenuItem,
   NavigationMenuLink,
   NavigationMenuList,
-  NavigationMenuTrigger,
 } from "@/components/ui/navigation-menu";
 import {
   Sheet,
@@ -24,58 +22,15 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-const productsItems = [
-  {
-    title: "Context Packages",
-    href: "/",
-    description: "Generate versioned AI development context for your projects",
-  },
-  {
-    title: "Registry",
-    href: "/registry",
-    description: "Browse the technology registry and community suggestions",
-  },
-  {
-    title: "Templates",
-    href: "/templates",
-    description: "Start from pre-built project templates",
-  },
-];
-
-const supportItems = [
-  {
-    title: "Documentation",
-    href: "#docs",
-    description: "Guides and API reference",
-  },
-  {
-    title: "Contact",
-    href: "#contact",
-    description: "Get in touch with our team",
-  },
-  {
-    title: "Status",
-    href: "#status",
-    description: "System uptime and incident reports",
-  },
-];
-
 const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "How it Works", href: "#how-it-works" },
-  { label: "Pricing", href: "#pricing" },
-  { label: "Docs", href: "#docs" },
-  { label: "Changelog", href: "#changelog" },
+  { label: "Registry", href: "/registry" },
+  { label: "Templates", href: "/templates" },
+  { label: "Dashboard", href: "/dashboard" },
 ];
-
-const navTriggerClass =
-  "h-9 bg-transparent px-3 text-sm font-medium text-neutral-400 shadow-none hover:bg-transparent hover:text-white focus:bg-transparent focus:text-white data-open:bg-transparent data-open:text-white data-open:hover:bg-transparent data-open:hover:text-white data-popup-open:bg-transparent data-popup-open:text-white data-popup-open:hover:bg-transparent data-popup-open:hover:text-white";
 
 const navLinkClass =
   "inline-flex h-9 items-center justify-center rounded-lg bg-transparent px-3 text-sm font-medium text-neutral-400 transition-colors hover:bg-transparent hover:text-white focus:bg-transparent focus:text-white";
 
-const dropdownLinkClass =
-  "block rounded-md bg-transparent p-3 text-sm transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white";
 
 function ContextForgeLogo({ className }: { className?: string }) {
   return (
@@ -115,28 +70,6 @@ function ContextForgeLogo({ className }: { className?: string }) {
         ContextForge
       </span>
     </Link>
-  );
-}
-
-function DropdownLink({
-  title,
-  href,
-  description,
-}: {
-  title: string;
-  href: string;
-  description: string;
-}) {
-  return (
-    <li>
-      <NavigationMenuLink
-        render={<Link href={href} />}
-        className={dropdownLinkClass}
-      >
-        <div className="font-medium text-white">{title}</div>
-        <p className="mt-1 text-xs leading-snug text-neutral-500">{description}</p>
-      </NavigationMenuLink>
-    </li>
   );
 }
 

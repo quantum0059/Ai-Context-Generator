@@ -39,8 +39,8 @@ const spec: ProjectSpec = {
 describe("generation model roles", () => {
   it("uses the requested Groq models", () => {
     expect(MODELS.FAST).toBe("llama-3.1-8b-instant");
-    expect(MODELS.CONTENT).toBe("qwen/qwen3.6-27b");
-    expect(MODELS.CONTENT_FALLBACK).toBe("llama-3.3-70b-versatile");
+    expect(MODELS.CONTENT).toBe("llama-3.3-70b-versatile");
+    expect(MODELS.CONTENT_FALLBACK).toBe("llama-3.1-8b-instant");
     expect(MODELS.REASONING).toBe("deepseek-r1-distill-llama-70b");
   });
 

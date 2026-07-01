@@ -152,18 +152,23 @@ describe("dynamic category discovery (offline heuristic)", () => {
 });
 
 describe("suggestion resolution", () => {
-  it("returns registry-backed (tier 1) high-confidence candidates", async () => {
+  it("returns registry-backed (tier 1) candidates with low confidence in heuristic mode", async () => {
     const result = await suggestForCategory("authentication", draft);
     expect(result.tier).toBe("registry");
     expect(result.candidates.length).toBeGreaterThan(0);
     for (const c of result.candidates) {
       expect(c.source).toBe("suggested");
-      expect(c.confidence).toBe("high");
+      // Without an AI key, the heuristic fallback correctly reports low
+      // confidence — the selection is by registry priority, not contextual
+      // reasoning. This ensures downstream skill files carry a verify warning.
+      expect(c.confidence).toBe("low");
     }
   });
 
   it("falls back to community tier for novel categories", async () => {
-    const result = await suggestForCategory("walletProvider", draft);
+    // Use a category with zero registry entries — walletProvider now has
+    // real entries (Wagmi, RainbowKit, Privy) after the Phase 2 buildout.
+    const result = await suggestForCategory("quantumComputing", draft);
     expect(result.tier).toBe("community");
     expect(result.candidates[0].source).toBe("community");
     expect(result.candidates[0].confidence).toBe("low");
