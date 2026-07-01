@@ -61,8 +61,12 @@ describe("generation model roles", () => {
 describe("prompt quality guard", () => {
   it("rejects stub prompts and accepts substantial implementation prompts", () => {
     expect(isPromptContentValid("expect(true).toBe(true)", "AST Parser", "concept-detection")).toBe(false);
-    const valid = `# AST Parser concept-detection\n\nPath: src/analysis/concepts.ts\n\ninterface ConceptMatch { name: string }\n\n## Acceptance Criteria\n- [ ] Detect recursion\n- [ ] Detect loops\n- [ ] Add tests\n\n${"Detailed implementation guidance. ".repeat(30)}`;
+    const valid = `# AST Parser concept-detection\n\nPath: src/analysis/concepts.ts\n\ninterface ConceptMatch { name: string }\n\n## Acceptance Criteria\n- [ ] Detect recursion\n- [ ] Detect loops\n- [ ] Add tests\n\n## Definition of Done\n- [ ] All files compile\n\n## Self-Verification\n1. Did I use only locked-stack imports?\n\n${"Detailed implementation guidance. ".repeat(30)}`;
     expect(isPromptContentValid(valid, "AST Parser", "concept-detection")).toBe(true);
+
+    // A substantial prompt missing the completion contract is now rejected.
+    const missingContract = `# AST Parser concept-detection\n\nPath: src/analysis/concepts.ts\n\ninterface ConceptMatch { name: string }\n\n## Acceptance Criteria\n- [ ] Detect recursion\n\n${"Detailed implementation guidance. ".repeat(30)}`;
+    expect(isPromptContentValid(missingContract, "AST Parser", "concept-detection")).toBe(false);
   });
 
   it("emits a rich static fallback prompt when AI is unavailable", async () => {
