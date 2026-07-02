@@ -252,8 +252,8 @@ function buildViolationBanner(
     byFile.set(v.file, list);
   }
 
-  const lines = [...byFile.entries()]
-    .map(([file, issues]) => `- **${file}**\n` + issues.map((i) => `  - ${i}`).join("\n"))
+  const lines = Array.from(byFile.entries())
+    .map(([file, issues]) => `- **${file}**\n` + issues.map((i: string) => `  - ${i}`).join("\n"))
     .join("\n");
 
   return (

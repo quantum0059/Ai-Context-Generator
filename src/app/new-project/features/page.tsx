@@ -7,17 +7,17 @@ import { StepIndicator } from "@/components/wizard/step-indicator";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 import { Button } from "@/components/ui/button";
 import { inferPlatform } from "@/lib/inferPlatform";
-import type { RichFeature } from "@/types/projectspec";
+import type { Feature } from "@/types/projectspec";
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
-interface RichEpic {
+interface Epic {
   name: string;
-  features: RichFeature[];
+  features: Feature[];
 }
 
-interface RichFeatureSetResponse {
-  epics: RichEpic[];
+interface FeatureSetResponse {
+  epics: Epic[];
   criticalPath: string[];
   outOfScopeGlobal: string[];
   /** Backwards-compat flat list for wizard state */
@@ -29,15 +29,15 @@ interface RichFeatureSetResponse {
 // ─── Priority badge helpers ───────────────────────────────────────────────────
 
 const PRIORITY_STYLES: Record<string, string> = {
-  "must-have": "bg-red-500/10 text-red-400 border border-red-500/20",
-  "should-have": "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20",
-  "nice-to-have": "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+  must: "bg-red-500/10 text-red-400 border border-red-500/20",
+  should: "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20",
+  nice: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
 };
 
 const PRIORITY_LABEL: Record<string, string> = {
-  "must-have": "Must",
-  "should-have": "Should",
-  "nice-to-have": "Nice",
+  must: "Must",
+  should: "Should",
+  nice: "Nice",
 };
 
 function PriorityBadge({ priority }: { priority: string }) {
@@ -55,13 +55,11 @@ function FeatureCard({
   isSelected,
   onToggle,
 }: {
-  feature: RichFeature;
+  feature: Feature;
   isSelected: boolean;
-  onToggle: (name: string, checked: boolean) => void;
+  onToggle: (title: string, checked: boolean) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const hasCriteria = feature.acceptanceCriteria?.length > 0;
-  const hasDeps = feature.dependsOn?.length > 0;
+  const hasDeps = feature.dependencies?.length > 0;
 
   return (
     <div
@@ -76,95 +74,35 @@ function FeatureCard({
         <input
           type="checkbox"
           checked={isSelected}
-          onChange={(e) => onToggle(feature.name, e.target.checked)}
+          onChange={(e) => onToggle(feature.title, e.target.checked)}
           className="mt-0.5 size-4 shrink-0 rounded border-white/[0.20] bg-transparent accent-white"
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-medium text-white">{feature.name}</span>
+            <span className="text-sm font-medium text-white">{feature.title}</span>
             <PriorityBadge priority={feature.priority} />
             {hasDeps && (
               <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-white/40">
-                depends on {feature.dependsOn.length}
+                depends on {feature.dependencies.length}
               </span>
             )}
           </div>
           <span className="mt-0.5 block text-xs text-[#666]">{feature.description}</span>
-        </div>
-        {hasCriteria && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              setExpanded((v) => !v);
-            }}
-            className="ml-1 shrink-0 text-[#555] transition-colors hover:text-white"
-            aria-label={expanded ? "Collapse criteria" : "Expand criteria"}
-          >
-            <svg
-              className={`size-4 transition-transform ${expanded ? "rotate-180" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-        )}
-      </label>
-
-      {/* Expanded acceptance criteria + deps */}
-      {expanded && (
-        <div className="border-t border-white/[0.06] px-3 pb-3 pt-2">
-          {hasCriteria && (
-            <>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#555]">
-                Acceptance Criteria
-              </p>
-              <ul className="space-y-0.5">
-                {feature.acceptanceCriteria.map((criterion, i) => (
-                  <li key={i} className="flex items-start gap-1.5">
-                    <span className="mt-0.5 text-emerald-500">✓</span>
-                    <span className="text-xs text-[#888]">{criterion}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
+          
           {hasDeps && (
-            <div className="mt-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#555]">
-                Depends On
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {feature.dependsOn.map((dep) => (
-                  <span
-                    key={dep}
-                    className="rounded bg-white/5 px-2 py-0.5 text-xs text-white/50"
-                  >
-                    {dep}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {feature.outOfScope?.length > 0 && (
-            <div className="mt-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#555]">
-                Out of Scope
-              </p>
-              <ul className="space-y-0.5">
-                {feature.outOfScope.map((item, i) => (
-                  <li key={i} className="flex items-start gap-1.5">
-                    <span className="mt-0.5 text-red-500/70">✗</span>
-                    <span className="text-xs text-[#666]">{item}</span>
-                  </li>
-                ))}
-              </ul>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {feature.dependencies.map((dep) => (
+                <span
+                  key={dep}
+                  className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-white/50"
+                >
+                  depends on: {dep}
+                </span>
+              ))}
             </div>
           )}
         </div>
-      )}
+      </label>
     </div>
   );
 }
@@ -173,7 +111,7 @@ function FeatureCard({
 
 export default function FeaturesPage() {
   const { state, updateState } = useWizard();
-  const [richSet, setRichSet] = useState<RichFeatureSetResponse | null>(null);
+  const [richSet, setRichSet] = useState<FeatureSetResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [customInput, setCustomInput] = useState("");
@@ -193,6 +131,7 @@ export default function FeaturesPage() {
 
         // Step 1: discover project type
         let currentProjectType = state.projectType;
+        let currentArchitecturalRequirements: any = undefined;
         const discoverRes = await fetch("/api/contextforge/discover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -203,25 +142,34 @@ export default function FeaturesPage() {
             features: state.features,
           }),
         });
-        if (discoverRes.ok) {
-          const discoverData = await discoverRes.json();
-          currentProjectType = discoverData.projectType || currentProjectType;
-          const fullCategories = discoverData.fullCategories?.length
-            ? discoverData.fullCategories
-            : (discoverData.requiredCategories || []).map((key: string) => ({
-                key,
-                label: key
-                  .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-                  .replace(/\b\w/g, (letter: string) => letter.toUpperCase()),
-                reason: "Required based on the project description and selected features",
-                relevantToProjectType: true,
-              }));
-          updateState({
-            projectType: discoverData.projectType || "",
-            classificationReason: discoverData.classificationReason || "",
-            fullCategories,
-          });
+        if (!discoverRes.ok) {
+          const errData = await discoverRes.json().catch(() => ({}));
+          if (discoverRes.status === 429) {
+            setError("Rate limit exceeded. Please wait a minute before trying again.");
+          } else {
+            setError(errData.error || "Failed to analyze project description.");
+          }
+          setLoading(false);
+          return;
         }
+        const discoverData = await discoverRes.json();
+        currentProjectType = discoverData.projectType || currentProjectType;
+        currentArchitecturalRequirements = discoverData.architecturalRequirements;
+        const fullCategories = discoverData.fullCategories?.length
+          ? discoverData.fullCategories
+          : (discoverData.requiredCategories || []).map((key: string) => ({
+              key,
+              label: key
+                .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+                .replace(/\b\w/g, (letter: string) => letter.toUpperCase()),
+              reason: "Required based on the project description and selected features",
+              relevantToProjectType: true,
+            }));
+        updateState({
+          projectType: discoverData.projectType || "",
+          classificationReason: discoverData.classificationReason || "",
+          fullCategories,
+        });
 
         // Step 2: extract rich features — pass existing user selections for deduplication
         const res = await fetch("/api/contextforge/suggest-features", {
@@ -233,9 +181,10 @@ export default function FeaturesPage() {
             platform,
             projectType: currentProjectType,
             existingFeatures: state.features,
+            functionalRequirements: currentArchitecturalRequirements?.functional ?? [],
           }),
         });
-        const data: RichFeatureSetResponse = await res.json();
+        const data: FeatureSetResponse = await res.json();
         if (!res.ok) {
           throw new Error((data as any).error?.fieldErrors ?? "Failed to fetch suggestions");
         }
@@ -265,7 +214,7 @@ export default function FeaturesPage() {
 
     // Deduplication: check against both existing selections and suggested features
     const allSuggestedNames = (richSet?.epics ?? [])
-      .flatMap((e) => e.features.map((f) => f.name.toLowerCase()));
+      .flatMap((e) => e.features.map((f) => f.title.toLowerCase()));
     const isDuplicate =
       allSuggestedNames.includes(trimmed.toLowerCase()) ||
       state.features.some((f) => f.toLowerCase() === trimmed.toLowerCase());
@@ -277,17 +226,16 @@ export default function FeaturesPage() {
       return;
     }
 
-    // Add a minimal RichFeature to the first epic (or create a "Custom" epic)
-    const customFeature: RichFeature = {
-      name: trimmed,
+    // Add a minimal Feature to the first epic (or create a "Custom" epic)
+    const customFeature: Feature = {
+      id: crypto.randomUUID?.() ?? `feat-${Date.now()}`,
+      title: trimmed,
       epic: "Custom",
       description: "Custom feature added by the user.",
-      priority: "should-have",
-      userRole: "end-user",
-      acceptanceCriteria: [],
-      outOfScope: [],
-      dependsOn: [],
-      technicalImplications: [],
+      priority: "should",
+      dependencies: [],
+      source: "explicit",
+      functionalRequirementIds: [],
       isUserProvided: true,
     };
 
@@ -377,9 +325,9 @@ export default function FeaturesPage() {
                   <div className="space-y-2">
                     {epic.features.map((feature) => (
                       <FeatureCard
-                        key={feature.name}
+                        key={feature.title}
                         feature={feature}
-                        isSelected={state.features.includes(feature.name)}
+                        isSelected={state.features.includes(feature.title)}
                         onToggle={toggleFeature}
                       />
                     ))}

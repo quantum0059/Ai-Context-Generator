@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { claudeJson, isClaudeConfigured } from "@/lib/claude";
-import { MODELS } from "@/lib/ai-models";
-import type { RichFeature, RichFeatureSet } from "@/types/projectspec";
+import { isClaudeConfigured } from "@/lib/claude";
+import type { Feature, FeatureSet } from "@/types/projectspec";
+import { normalizeAndGroupFeatures } from "@/contextforge/feature-pipeline";
 
 // ─── Request schema ───────────────────────────────────────────────────────────
 
@@ -12,38 +12,13 @@ const requestSchema = z.object({
   projectType: z.string().optional(),
   /** Features the user has already typed/selected — we will NOT duplicate these */
   existingFeatures: z.array(z.string()).optional(),
-});
-
-// ─── Response Zod schema (mirrors RichFeature / RichFeatureSet) ───────────────
-
-const richFeatureSchema = z.object({
-  name: z.string().min(1),
-  epic: z.string().min(1),
-  description: z.string().min(1),
-  priority: z.enum(["must-have", "should-have", "nice-to-have"]),
-  userRole: z.string().min(1),
-  acceptanceCriteria: z.array(z.string()).min(2).max(5),
-  outOfScope: z.array(z.string()),
-  dependsOn: z.array(z.string()),
-  technicalImplications: z.array(z.string()),
-});
-
-const richFeatureSetSchema = z.object({
-  epics: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        features: z.array(richFeatureSchema).min(1),
-      }),
-    )
-    .min(1),
-  criticalPath: z.array(z.string()).min(1),
-  outOfScopeGlobal: z.array(z.string()),
+  /** Functional requirements extracted in the previous step */
+  functionalRequirements: z.array(z.any()).optional(),
 });
 
 // ─── Product-archetype inference (vague-description fallback) ─────────────────
 
-type FeatureDefBase = Omit<RichFeature, "isUserProvided">;
+type FeatureDefBase = Omit<Feature, "isUserProvided">;
 
 /**
  * When a description names no concrete features, infer the baseline feature
@@ -59,69 +34,66 @@ function archetypeFeatures(text: string, projectType: string): FeatureDefBase[] 
   const f = (
     name: string,
     description: string,
-    priority: RichFeature["priority"],
-    acceptanceCriteria: string[],
-    technicalImplications: string[],
-    dependsOn: string[] = [],
+    priority: Feature["priority"],
+    dependencies: string[] = [],
   ): FeatureDefBase => ({
-    name,
+    id: `feat-${name.toLowerCase().replace(/\s+/g, "-")}`,
+    title: name,
     epic: "Core Product",
     description,
     priority,
-    userRole: "end-user",
-    acceptanceCriteria,
-    outOfScope: [],
-    dependsOn,
-    technicalImplications,
+    dependencies,
+    source: "implicit",
+    functionalRequirementIds: [],
   });
 
   const archetypes: Array<{ match: RegExp; features: FeatureDefBase[] }> = [
     {
       match: /\b(marketplace|classified|listing|buy and sell|two[- ]sided)\b/,
       features: [
-        f("Listing Creation & Management", "Sellers can create, edit, and remove listings with images and pricing.", "must-have", ["A seller can publish a listing with title, description, price, and images", "Listings can be edited and taken down by their owner"], ["database", "storage"]),
-        f("Browse & Search Listings", "Buyers can browse, search, and filter available listings.", "must-have", ["Listings are searchable by keyword", "Results can be filtered by category and price"], ["database", "searchProvider"]),
-        f("Buyer–Seller Messaging", "Buyers and sellers communicate about a listing in-app.", "should-have", ["A buyer can message a seller about a specific listing", "Both parties see a threaded conversation history"], ["database", "websocket"]),
+        f("Listing Creation & Management", "Sellers can create, edit, and remove listings with images and pricing.", "must"),
+        f("Browse & Search Listings", "Buyers can browse, search, and filter available listings.", "must"),
+        f("Buyer–Seller Messaging", "Buyers and sellers communicate about a listing in-app.", "should"),
       ],
     },
     {
       match: /\b(booking|reservation|appointment|schedule|calendar)\b/,
       features: [
-        f("Availability & Scheduling", "Providers publish availability and customers book open slots.", "must-have", ["A provider can define available time slots", "A customer can book an open slot and receives confirmation"], ["database"]),
-        f("Booking Management", "Customers and providers view, reschedule, and cancel bookings.", "must-have", ["A customer can cancel or reschedule within the allowed window", "Cancellations free the slot for others"], ["database"]),
-        f("Reminders & Notifications", "Automated reminders reduce no-shows.", "should-have", ["A reminder is sent before the appointment", "Users can opt out of reminders"], ["email", "database"]),
+        f("Availability & Scheduling", "Providers publish availability and customers book open slots.", "must"),
+        f("Booking Management", "Customers and providers view, reschedule, and cancel bookings.", "must"),
+        f("Reminders & Notifications", "Automated reminders reduce no-shows.", "should"),
       ],
     },
     {
       match: /\b(social|community|feed|follow|post|share)\b/,
       features: [
-        f("User Profiles", "Members have a public profile with their activity.", "must-have", ["A user can set a display name, avatar, and bio", "Other users can view a member's public profile"], ["database", "storage"]),
-        f("Content Feed", "Members create posts and see a personalised feed.", "must-have", ["A user can publish a post that appears in followers' feeds", "The feed loads incrementally as the user scrolls"], ["database"]),
-        f("Follow & Engagement", "Members follow others and react to content.", "should-have", ["A user can follow and unfollow other members", "A user can like or comment on a post"], ["database"]),
+        f("User Profiles", "Members have a public profile with their activity.", "must"),
+        f("Content Feed", "Members create posts and see a personalised feed.", "must"),
+        f("Follow & Engagement", "Members follow others and react to content.", "should"),
       ],
     },
     {
       match: /\b(saas|dashboard|b2b|productivity|management tool|internal tool|crm|erp)\b/,
       features: [
-        f("Workspace & Team Management", "Users work inside a shared workspace with roles.", "must-have", ["An owner can invite members to a workspace", "Members are assigned roles that gate permissions"], ["authentication", "database"]),
-        f("Core Records Management", "Users create, view, update, and delete the primary domain records.", "must-have", ["A user can create and edit the core record type", "Records are listed with search and pagination"], ["database"]),
-        f("Reporting & Insights", "Users see key metrics for their workspace.", "should-have", ["A dashboard shows at least three core metrics", "Data can be exported"], ["analytics", "database"]),
+        f("Workspace & Team Management", "Users work inside a shared workspace with roles.", "must"),
+        f("Core Records Management", "Users create, view, update, and delete the primary domain records.", "must"),
+        f("Reporting & Insights", "Users see key metrics for their workspace.", "should"),
       ],
     },
     {
       match: /\b(shop|store|e[- ]?commerce|cart|product catalog|retail)\b/,
       features: [
-        f("Product Catalog", "Shoppers browse products organised by category.", "must-have", ["Products are listed with images, price, and description", "Products can be filtered by category"], ["database", "storage"]),
-        f("Shopping Cart & Checkout", "Shoppers add items to a cart and check out.", "must-have", ["Items can be added to and removed from the cart", "Checkout collects shipping and confirms the order"], ["database", "payments"]),
-        f("Order History", "Customers review their past orders and status.", "should-have", ["A customer can view a list of their past orders", "Each order shows its current fulfilment status"], ["database"]),
+        f("Product Catalog", "Shoppers browse products organised by category.", "must"),
+        f("Shopping Cart & Checkout", "Shoppers add items to a cart and check out.", "must"),
+        f("Order History", "Customers review their past orders and status.", "should"),
       ],
     },
     {
       match: /\b(blog|cms|publication|magazine|news|editorial|articles?)\b/,
       features: [
-        f("Content Authoring", "Authors write and publish richly formatted content.", "must-have", ["An author can draft, edit, and publish an article", "Drafts are saved automatically"], ["database", "cms"]),
-        f("Content Browsing", "Readers browse and read published content.", "must-have", ["Published articles are listed newest-first", "An article renders its full formatted content"], ["database"]),
-        f("Categories & Search", "Readers find content by topic or search.", "should-have", ["Articles are grouped by category or tag", "Readers can search article titles and bodies"], ["searchProvider", "database"]),
+        f("Content Authoring", "Authors write and publish richly formatted content.", "must"),
+        f("Content Browsing", "Readers browse and read published content.", "must"),
+        f("Categories & Search", "Readers find content by topic or search.", "should"),
       ],
     },
   ];
@@ -133,9 +105,9 @@ function archetypeFeatures(text: string, projectType: string): FeatureDefBase[] 
   // Generic UI application baseline when no specific archetype matches but the
   // project clearly has an interface. Better than a lone "Core Feature" stub.
   return [
-    f("Primary User Workflow", "The main end-to-end task the product exists to support.", "must-have", ["A user can complete the product's primary task start to finish", "Progress is preserved if the user leaves and returns"], ["database"]),
-    f("Content or Data Management", "Users create and manage the core data the product works with.", "must-have", ["A user can create and edit the core data entity", "Data is validated before it is saved"], ["database"]),
-    f("Account & Settings", "Users manage their profile and preferences.", "should-have", ["A user can update their profile details", "Preferences persist across sessions"], ["authentication", "database"]),
+    f("Primary User Workflow", "The main end-to-end task the product exists to support.", "must"),
+    f("Content or Data Management", "Users create and manage the core data the product works with.", "must"),
+    f("Account & Settings", "Users manage their profile and preferences.", "should"),
   ];
 }
 
@@ -147,12 +119,12 @@ function archetypeFeatures(text: string, projectType: string): FeatureDefBase[] 
  * and dependency edges derived from keyword analysis — NOT a hardcoded
  * IDE-centric pool.
  */
-function heuristicRichFeatureSet(
+function heuristicFeatureSet(
   description: string,
   platform: string,
   projectType: string,
   existingFeatureNames: Set<string>,
-): RichFeatureSet {
+): FeatureSet {
   const text = `${description} ${platform}`.toLowerCase();
   const isBackend = projectType === "BACKEND_API" || projectType === "HEADLESS_ENGINE";
   const isCli = projectType === "CLI_TOOL";
@@ -168,43 +140,32 @@ function heuristicRichFeatureSet(
   const hasAdmin = /\b(admin|manage|backoffice|moderator)\b/.test(text);
   const hasOnboarding = /\b(onboard|setup wizard|getting started|first.?run)\b/.test(text);
 
-  type FeatureDef = Omit<RichFeature, "isUserProvided">;
+  type FeatureDef = Omit<Feature, "isUserProvided">;
 
   // Infrastructure / foundation
   const foundationFeatures: FeatureDef[] = [];
   if (hasDB && !isLib) {
     foundationFeatures.push({
-      name: "Database Schema & Migrations",
+      id: "feat-db",
+      title: "Database Schema & Migrations",
       epic: "Core Infrastructure",
       description: "Define the data model, relationships, and migration strategy for persistent storage.",
-      priority: "must-have",
-      userRole: "system",
-      acceptanceCriteria: [
-        "All core domain entities have corresponding tables/collections",
-        "Migrations are idempotent and can be rolled back",
-        "Schema is documented with field descriptions",
-      ],
-      outOfScope: ["Application logic", "UI components"],
-      dependsOn: [],
-      technicalImplications: ["database", "ORM or query builder"],
+      priority: "must",
+      dependencies: [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
   if (hasAuth && !isBackend && !isCli && !isLib) {
     foundationFeatures.push({
-      name: "User Authentication",
+      id: "feat-auth",
+      title: "User Authentication",
       epic: "Core Infrastructure",
       description: "Secure sign-up, sign-in, session management, and password reset flows.",
-      priority: "must-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "User can register with email and password",
-        "User can sign in and receives a valid session token",
-        "Session expires after inactivity and user is redirected to login",
-        "Password reset sends an email with a time-limited link",
-      ],
-      outOfScope: ["Social OAuth (unless specified)", "MFA setup"],
-      dependsOn: ["Database Schema & Migrations"],
-      technicalImplications: ["authentication", "database"],
+      priority: "must",
+      dependencies: ["Database Schema & Migrations"],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
 
@@ -212,53 +173,38 @@ function heuristicRichFeatureSet(
   const domainFeatures: FeatureDef[] = [];
   if (hasSearch) {
     domainFeatures.push({
-      name: "Search & Filtering",
+      id: "feat-search",
+      title: "Search & Filtering",
       epic: "Core Product",
       description: "Full-text and faceted search across the primary content type.",
-      priority: "should-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "User can enter a search query and see relevant results within 500 ms",
-        "Results can be filtered by at least one attribute",
-        "Empty-state is shown when no results match",
-      ],
-      outOfScope: ["AI-powered semantic search", "search analytics"],
-      dependsOn: hasDB ? ["Database Schema & Migrations"] : [],
-      technicalImplications: ["searchProvider", "database"],
+      priority: "should",
+      dependencies: hasDB ? ["Database Schema & Migrations"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
   if (hasMedia) {
     domainFeatures.push({
-      name: "File Upload & Management",
+      id: "feat-media",
+      title: "File Upload & Management",
       epic: "Core Product",
       description: "Upload, store, and retrieve files (images, documents, or media) with validation.",
-      priority: "should-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "User can upload a file up to the configured size limit",
-        "Unsupported file types are rejected with a clear error",
-        "Uploaded files are retrievable via a stable URL",
-      ],
-      outOfScope: ["Video transcoding", "CDN configuration"],
-      dependsOn: hasAuth ? ["User Authentication"] : [],
-      technicalImplications: ["storage"],
+      priority: "should",
+      dependencies: hasAuth ? ["User Authentication"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
   if (hasAI) {
     domainFeatures.push({
-      name: "AI Integration",
+      id: "feat-ai",
+      title: "AI Integration",
       epic: "Core Product",
       description: "Connect to an AI provider to generate, analyse, or assist with content.",
-      priority: "must-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "AI responses are streamed to the user in real-time",
-        "Errors from the AI provider are surfaced gracefully with a retry option",
-        "Prompt context is scoped to the current session to avoid data leakage",
-      ],
-      outOfScope: ["Model fine-tuning", "on-device inference"],
-      dependsOn: hasAuth ? ["User Authentication"] : [],
-      technicalImplications: ["aiProvider"],
+      priority: "must",
+      dependencies: hasAuth ? ["User Authentication"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
 
@@ -266,19 +212,14 @@ function heuristicRichFeatureSet(
   const monetisationFeatures: FeatureDef[] = [];
   if (hasPayments) {
     monetisationFeatures.push({
-      name: "Payment & Subscription",
+      id: "feat-pay",
+      title: "Payment & Subscription",
       epic: "Monetisation",
       description: "Handle one-time payments or recurring subscriptions with a payment gateway.",
-      priority: "must-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "User can subscribe to a plan and is charged correctly",
-        "Subscription status is reflected immediately in the UI",
-        "Failed payments trigger a retry flow and user notification",
-      ],
-      outOfScope: ["Invoicing", "tax calculation", "multi-currency beyond gateway defaults"],
-      dependsOn: hasAuth ? ["User Authentication"] : [],
-      technicalImplications: ["payments", "authentication"],
+      priority: "must",
+      dependencies: hasAuth ? ["User Authentication"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
 
@@ -286,53 +227,38 @@ function heuristicRichFeatureSet(
   const operationsFeatures: FeatureDef[] = [];
   if (hasNotifications) {
     operationsFeatures.push({
-      name: "Notification System",
+      id: "feat-notify",
+      title: "Notification System",
       epic: "Operations & Engagement",
       description: "Send in-app, email, or push notifications for key user-facing events.",
-      priority: "should-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "Notifications are delivered within 30 seconds of the triggering event",
-        "User can opt out of non-critical notifications",
-        "Notifications link back to the relevant resource in the app",
-      ],
-      outOfScope: ["SMS notifications", "notification history older than 90 days"],
-      dependsOn: hasAuth ? ["User Authentication"] : [],
-      technicalImplications: ["email", "database"],
+      priority: "should",
+      dependencies: hasAuth ? ["User Authentication"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
   if (hasAnalytics) {
     operationsFeatures.push({
-      name: "Analytics Dashboard",
+      id: "feat-analytics",
+      title: "Analytics Dashboard",
       epic: "Operations & Engagement",
       description: "Visualise key product metrics for operators or admins.",
-      priority: "nice-to-have",
-      userRole: "admin",
-      acceptanceCriteria: [
-        "Dashboard displays at least 3 core KPIs",
-        "Data is refreshed at most every 5 minutes",
-        "Charts are exportable as PNG or CSV",
-      ],
-      outOfScope: ["Real-time streaming analytics", "custom report builder"],
-      dependsOn: hasDB ? ["Database Schema & Migrations"] : [],
-      technicalImplications: ["analytics", "database"],
+      priority: "nice",
+      dependencies: hasDB ? ["Database Schema & Migrations"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
   if (hasAdmin) {
     operationsFeatures.push({
-      name: "Admin Panel",
+      id: "feat-admin",
+      title: "Admin Panel",
       epic: "Operations & Engagement",
       description: "Back-office interface for managing users, content, and configuration.",
-      priority: "should-have",
-      userRole: "admin",
-      acceptanceCriteria: [
-        "Admin can view and search all user accounts",
-        "Admin can suspend or delete an account",
-        "Admin actions are logged with a timestamp and actor",
-      ],
-      outOfScope: ["Analytics reporting", "billing management"],
-      dependsOn: hasAuth ? ["User Authentication"] : [],
-      technicalImplications: ["authentication", "database"],
+      priority: "should",
+      dependencies: hasAuth ? ["User Authentication"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
 
@@ -340,28 +266,23 @@ function heuristicRichFeatureSet(
   const uxFeatures: FeatureDef[] = [];
   if (hasOnboarding || (!isBackend && !isCli && !isLib)) {
     uxFeatures.push({
-      name: "Onboarding Flow",
+      id: "feat-onboard",
+      title: "Onboarding Flow",
       epic: "User Experience",
       description: "Guide new users from registration to their first meaningful action.",
-      priority: hasOnboarding ? "must-have" : "nice-to-have",
-      userRole: "end-user",
-      acceptanceCriteria: [
-        "New user is presented with a guided flow after first sign-in",
-        "User can skip the onboarding and access it again from settings",
-        "Completion of onboarding is persisted so it is not re-shown",
-      ],
-      outOfScope: ["Interactive product tours", "in-app video tutorials"],
-      dependsOn: hasAuth ? ["User Authentication"] : [],
-      technicalImplications: ["frontendFramework", "database"],
+      priority: hasOnboarding ? "must" : "nice",
+      dependencies: hasAuth ? ["User Authentication"] : [],
+      source: "implicit",
+      functionalRequirementIds: [],
     });
   }
 
   // Assemble epics, filtering out already-provided features
   function notProvided(f: FeatureDef): boolean {
-    return !existingFeatureNames.has(f.name.toLowerCase());
+    return !existingFeatureNames.has(f.title.toLowerCase());
   }
 
-  const epics: RichFeatureSet["epics"] = [];
+  const epics: FeatureSet["epics"] = [];
 
   const filteredFoundation = foundationFeatures.filter(notProvided);
   if (filteredFoundation.length > 0) epics.push({ name: "Core Infrastructure", features: filteredFoundation });
@@ -390,15 +311,14 @@ function heuristicRichFeatureSet(
         name: "Core Product",
         features: [
           {
-            name: "Core Feature",
+            id: "feat-core",
+            title: "Core Feature",
             epic: "Core Product",
             description: "Primary functionality of the project.",
-            priority: "must-have",
-            userRole: "end-user",
-            acceptanceCriteria: ["Feature behaves as described in the project brief", "Error states are handled gracefully"],
-            outOfScope: [],
-            dependsOn: [],
-            technicalImplications: [],
+            priority: "must",
+            dependencies: [],
+            source: "implicit",
+            functionalRequirementIds: [],
           },
         ],
       });
@@ -408,13 +328,13 @@ function heuristicRichFeatureSet(
   // Derive critical path: foundation first, then domain, then the rest
   const allFeatures = epics.flatMap((e) => e.features);
   const criticalPath = allFeatures
-    .filter((f) => f.priority === "must-have")
-    .sort((a, b) => a.dependsOn.length - b.dependsOn.length)
-    .map((f) => f.name);
+    .filter((f) => f.priority === "must")
+    .sort((a, b) => a.dependencies.length - b.dependencies.length)
+    .map((f) => f.title);
 
   return {
     epics,
-    criticalPath: criticalPath.length > 0 ? criticalPath : [allFeatures[0]?.name ?? "Core Feature"],
+    criticalPath: criticalPath.length > 0 ? criticalPath : [allFeatures[0]?.title ?? "Core Feature"],
     outOfScopeGlobal: [
       "Third-party integrations not explicitly listed in the project description",
       "Internationalisation and localisation (unless specified)",
@@ -425,8 +345,8 @@ function heuristicRichFeatureSet(
 
 // ─── Flatten helper used by the wizard ───────────────────────────────────────
 
-function flattenFeatureNames(set: RichFeatureSet): string[] {
-  return set.epics.flatMap((epic) => epic.features.map((f) => f.name));
+function flattenFeatureNames(set: FeatureSet): string[] {
+  return set.epics.flatMap((epic) => epic.features.map((f) => f.title));
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -443,14 +363,15 @@ export async function POST(req: Request) {
     platform = "web",
     projectType = "UI_APPLICATION",
     existingFeatures = [],
+    functionalRequirements = [],
   } = parsed.data;
 
   // Build a normalised Set of already-provided feature names for deduplication
   const existingFeatureNames = new Set(existingFeatures.map((f) => f.toLowerCase()));
 
   // ── Heuristic path (no AI configured) ──────────────────────────────────────
-  if (!isClaudeConfigured()) {
-    const set = heuristicRichFeatureSet(description, platform, projectType, existingFeatureNames);
+  if (!isClaudeConfigured() || functionalRequirements.length === 0) {
+    const set = heuristicFeatureSet(description, platform, projectType, existingFeatureNames);
     return Response.json({
       ...set,
       features: flattenFeatureNames(set), // backwards-compat flat list
@@ -459,92 +380,11 @@ export async function POST(req: Request) {
   }
 
   // ── AI path ─────────────────────────────────────────────────────────────────
-  const systemPrompt = `You are a senior software architect performing structured feature extraction for a software project. Your output feeds directly into an AI-driven code generation pipeline, so it must be precise, complete, and architecturally sound.
-
-Work through the mandatory steps in order:
-
-STEP 0 — PRODUCT CATEGORY & COMPLETENESS CHECK
-First identify what KIND of product this is (e.g. marketplace, booking platform, social app, SaaS dashboard, e-commerce store, blog/CMS, developer tool). Then judge how detailed the description is:
-- If the description already names concrete features, extract those and add the implicit ones they require.
-- If the description is VAGUE and names few or no features, you MUST infer the standard, expected feature set that comparable, successful real-world products in this exact category ship. Draw on your knowledge of how such products are actually built. Mark these inferred features with priority reflecting how essential they are, and treat them as "implicit". Never return a single generic "core feature" — a real product in this category has a known baseline of features, so produce it.
-The user must never leave this step with an empty or near-empty feature list just because they wrote a short description.
-
-STEP 1 — PROJECT ANALYSIS
-Read the description carefully. Identify:
-- The primary domain and project type (${projectType})
-- The key human actors (e.g. end-user, admin, guest, system)
-- What the project explicitly will NOT do (these go into outOfScopeGlobal)
-
-STEP 2 — EPIC GROUPING
-Cluster all features into logical domains called Epics (e.g. "Core Infrastructure", "User Experience", "Monetisation", "Operations"). Each Epic must have at least one feature. Do NOT create an Epic for a single feature that could belong elsewhere.
-
-STEP 3 — FEATURE DECOMPOSITION
-For every feature, derive:
-- priority: MoSCoW — "must-have" (cannot ship without it), "should-have" (high value, deferrable), "nice-to-have" (low urgency)
-- userRole: the actor who uses this (end-user, admin, system, developer, guest)
-- acceptanceCriteria: 2-4 specific, testable statements (NOT vague like "works correctly")
-- outOfScope: 1-3 explicit boundaries that prevent scope creep on this single feature
-- dependsOn: array of other feature NAMES that must exist before this can be built (empty array if none)
-- technicalImplications: stack categories this feature will need (e.g. "database", "authentication", "aiProvider", "storage")
-
-STEP 4 — DEDUPLICATION
-Do NOT suggest any feature whose name (case-insensitive) is in this list: [${existingFeatures.join(", ") || "none"}].
-
-STEP 5 — CRITICAL PATH
-List the feature names in topological order — each name after the first depends on all previous ones. Start with foundational pieces (database schema, auth) and end with optional/nice-to-have integrations.
-
-CRITICAL RULES:
-- If projectType is HEADLESS_ENGINE or BACKEND_API: do NOT suggest UI dashboards, theme systems, or onboarding flows as features
-- If projectType is CLI_TOOL: do NOT suggest frontend frameworks, browser APIs, or UI components
-- If projectType is LIBRARY_OR_SDK: do NOT suggest auth, databases, or deployment pipelines
-- Every feature name in criticalPath must exactly match a feature name inside epics
-- dependsOn must only reference other feature names that appear in your epics list
-- Return valid JSON only — no markdown, no code fences, no explanation
-
-JSON structure:
-{
-  "epics": [
-    {
-      "name": "Epic Name",
-      "features": [
-        {
-          "name": "Feature Name",
-          "epic": "Epic Name",
-          "description": "One sentence describing what the user gets",
-          "priority": "must-have | should-have | nice-to-have",
-          "userRole": "end-user | admin | system | developer | guest",
-          "acceptanceCriteria": ["Specific testable statement 1", "Specific testable statement 2"],
-          "outOfScope": ["Thing this feature will NOT do"],
-          "dependsOn": ["Other Feature Name"],
-          "technicalImplications": ["database", "authentication"]
-        }
-      ]
-    }
-  ],
-  "criticalPath": ["Feature A", "Feature B", "Feature C"],
-  "outOfScopeGlobal": ["Thing the entire project will not do"]
-}`;
-
-  const userPrompt = `Extract features for this project:
-
-Project Name: ${projectName}
-Description: ${description}
-Platform: ${platform}
-Project Type: ${projectType}
-
-Features the user already has (DO NOT duplicate these): ${existingFeatures.length > 0 ? existingFeatures.join(", ") : "none"}
-
-Suggest 6-12 features in total across all epics. Make every feature specific to THIS project — not generic boilerplate that would apply to any app. Think about what a real architect would scope and sequence for this exact product.
-
-If the description above is short or vague, do NOT under-deliver: infer the complete baseline feature set that a real, shipping product in this category is expected to have, so a non-technical user gets a usable starting point without having to think of every feature themselves.`;
-
   try {
-    const result = await claudeJson(
-      systemPrompt,
-      userPrompt,
-      richFeatureSetSchema,
-      0,
-      MODELS.REASONING,
+    const result = await normalizeAndGroupFeatures(
+      functionalRequirements,
+      projectName,
+      existingFeatures
     );
 
     // Secondary deduplication pass: strip any feature the AI hallucinated anyway
@@ -553,7 +393,7 @@ If the description above is short or vague, do NOT under-deliver: infer the comp
       epics: result.epics.map((epic) => ({
         ...epic,
         features: epic.features.filter(
-          (f) => !existingFeatureNames.has(f.name.toLowerCase()),
+          (f) => !existingFeatureNames.has(f.title.toLowerCase()),
         ),
       })).filter((epic) => epic.features.length > 0),
     };
@@ -565,8 +405,8 @@ If the description above is short or vague, do NOT under-deliver: infer the comp
     });
   } catch (err) {
     console.error("[SuggestFeatures Error]", err);
-    // Graceful structured fallback — never returns the old flat-array shape
-    const set = heuristicRichFeatureSet(description, platform, projectType, existingFeatureNames);
+    // Graceful structured fallback
+    const set = heuristicFeatureSet(description, platform, projectType, existingFeatureNames);
     return Response.json({
       ...set,
       features: flattenFeatureNames(set),

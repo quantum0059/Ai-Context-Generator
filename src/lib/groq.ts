@@ -52,8 +52,7 @@ export async function groqJson<T>(
     try {
       if (
         activeModel === GROQ_DEFAULT_MODEL ||
-        activeModel === MODELS.CONTENT_FALLBACK ||
-        activeModel === MODELS.FAST
+        activeModel === MODELS.CONTENT_FALLBACK
       ) {
         console.log(`[Generator] Using model: ${activeModel}`);
       }
@@ -119,8 +118,7 @@ export async function groqText(
     try {
       if (
         activeModel === GROQ_DEFAULT_MODEL ||
-        activeModel === MODELS.CONTENT_FALLBACK ||
-        activeModel === MODELS.FAST
+        activeModel === MODELS.CONTENT_FALLBACK
       ) {
         console.log(`[Generator] Using model: ${activeModel}`);
       }

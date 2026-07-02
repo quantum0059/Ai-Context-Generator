@@ -174,48 +174,33 @@ export interface DiscoveredCategory {
 }
 
 /**
- * A fully decomposed feature node. Carries grouping, priority, dependency
- * edges, acceptance criteria, and explicit out-of-scope boundaries so that
- * every downstream generator (prompts, roadmap, dependency-graph) can read
- * structured data instead of free-form strings.
+ * A normalized, independent capability that the user can select.
  */
-export interface RichFeature {
-  /** Display name of the feature (e.g. "User Authentication") */
-  name: string;
-  /** Epic / domain this feature belongs to (e.g. "Auth", "Content", "Analytics") */
-  epic: string;
-  /** One concise sentence describing what this feature does for the user */
+export interface Feature {
+  id: string;
+  title: string;
   description: string;
-  /** MoSCoW priority relative to the other features in this project */
-  priority: "must-have" | "should-have" | "nice-to-have";
-  /** Which actor primarily benefits (e.g. "end-user", "admin", "system") */
-  userRole: string;
-  /** 2–4 testable acceptance criteria in Given/When/Then or plain English */
-  acceptanceCriteria: string[];
-  /** Explicit list of what this feature will NOT do (prevents scope creep) */
-  outOfScope: string[];
-  /** Names of other features that MUST be built before this one can start */
-  dependsOn: string[];
-  /** Stack categories or infrastructure pieces this feature requires */
-  technicalImplications: string[];
+  epic: string;
+  priority: "must" | "should" | "nice";
+  dependencies: string[];
+  source: "explicit" | "implicit";
+  functionalRequirementIds: string[];
   /** True when the user typed this feature manually instead of selecting it */
   isUserProvided?: boolean;
 }
 
 /**
- * The full structured output of the Feature Extraction pipeline.
- * Features are grouped into Epics and a criticalPath is pre-computed so
- * downstream generators have a ready-made dependency order.
+ * The full structured output of the Feature Normalizer and Epic Builder.
  */
-export interface RichFeatureSet {
+export interface FeatureSet {
   /** Features organised by their parent Epic */
   epics: Array<{
     /** Epic name (e.g. "Core Infrastructure", "User Experience") */
     name: string;
-    features: RichFeature[];
+    features: Feature[];
   }>;
   /**
-   * Ordered list of feature names representing the minimum sequential
+   * Ordered list of feature titles representing the minimum sequential
    * build path — each item depends on all previous items.
    */
   criticalPath: string[];

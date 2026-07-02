@@ -36,9 +36,9 @@ const functionalRequirementSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
-  type: z.enum(["explicit", "implicit"]),
+  type: z.enum(["explicit", "implicit"]).catch("implicit"),
   actors: z.array(z.string()),
-  priority: z.enum(["must-have", "should-have", "nice-to-have"]),
+  priority: z.enum(["must-have", "should-have", "nice-to-have"]).catch("should-have"),
 });
 
 const nonFunctionalSchema = z.object({
@@ -63,7 +63,7 @@ const edgeCaseSchema = z.object({
     "input-validation",
     "external-service",
     "other",
-  ]),
+  ]).catch("other"),
 });
 
 const architecturalAnalysisSchema = z.object({
@@ -253,7 +253,7 @@ You must extract ALL of the following from the project description:
 2. SUCCESS CRITERIA — How will the stakeholders know this project succeeded? These are measurable outcomes.
 3. TARGET AUDIENCE — Who are the intended users? Describe each user type (persona).
 4. DOMAIN MODEL — What are the core entities (nouns) in this system? Who are the actors? What are their attributes and relationships? What are the core workflows?
-5. FUNCTIONAL REQUIREMENTS — List ALL features explicitly mentioned AND all features that must exist even if not stated (implicit). For example, a multi-user app implicitly needs authentication. A payment feature implicitly needs a receipt/confirmation. Format as FR-001, FR-002, etc.
+5. FUNCTIONAL REQUIREMENTS — Every independent user-facing capability must become its own Functional Requirement. Do not collapse multiple capabilities into generic requirements such as "AI Enhancements", "Image Editing", or "Media Processing". If a project explicitly mentions Background Removal, Upscaling, Multiple AI Models, Cloud Storage, Style Presets, Generation Settings, Cross-device Sync, or similar capabilities, each must become an independent Functional Requirement. Format as FR-001, FR-002, etc.
 6. NON-FUNCTIONAL REQUIREMENTS — Performance targets, security mandates, scalability needs, availability requirements, accessibility standards, regulatory compliance (GDPR, HIPAA, PCI-DSS, etc.), and maintainability expectations.
 7. EDGE CASES — What can go wrong? List failure modes, boundary conditions, race conditions, and error states the system must handle gracefully.
 
@@ -374,6 +374,7 @@ Return this exact JSON structure:
 }
 
 Critical rules:
+- functional must be EXTREMELY granular. Every independent user-facing capability must be its own Functional Requirement. DO NOT collapse capabilities (e.g. 'Background removal' and 'Upscaling' must be separate).
 - functional must include BOTH explicit (stated) and implicit (inferred) requirements
 - nonFunctional must have at least one entry per category where applicable; use [] only if truly not applicable
 - edgeCases must include at least 5 realistic scenarios for this domain

@@ -252,6 +252,7 @@ export async function discoverCategories(
   projectType?: string;
   classificationReason?: string;
   fullCategories?: any[];
+  architecturalRequirements?: any; // or import ArchitecturalRequirements type if not imported
 }> {
   const architecturalRequirements = await extractArchitecturalRequirements(
     draft.description,
@@ -386,6 +387,7 @@ Rules for this specific project:
           engine: "claude",
           projectType: result.projectType,
           classificationReason: result.classificationReason,
+          architecturalRequirements,
         };
       } catch (err) {
         console.error("[DiscoverCategories Error]", err);
@@ -417,6 +419,7 @@ Rules for this specific project:
       engine: "heuristic",
       projectType,
       classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} with offline code analysis specialization from the project description.`,
+      architecturalRequirements,
     };
   }
 
@@ -435,5 +438,6 @@ Rules for this specific project:
     engine: "heuristic",
     projectType,
     classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} from the project description and selected features.`,
+    architecturalRequirements,
   };
 }
