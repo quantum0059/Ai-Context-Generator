@@ -43,6 +43,8 @@ export interface DraftInput {
   classificationReason?: string;
   /** Full architectural requirements extracted by the requirement-extractor pipeline */
   architecturalRequirements?: ArchitecturalRequirements;
+  /** Categories already locked in by the user, keyed by category name. Powers cross-category affinity rules. */
+  stack?: Record<string, StackEntry>;
 }
 
 export interface SuggestionCandidate {

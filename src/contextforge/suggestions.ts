@@ -97,15 +97,10 @@ function applyAffinityRules(
   candidates: SuggestionCandidate[],
   draft: DraftInput,
 ): SuggestionCandidate[] {
-  const stack = draft.constraints as unknown as Record<string, unknown>;
-  // Also look inside draft.architecturalRequirements if available
   const lockedStack: Record<string, string> = {};
 
-  // Try to read already-locked stack values from the draft
-  // (DraftInput doesn't carry .stack, but callers may enrich it)
-  const anyDraft = draft as unknown as Record<string, unknown>;
-  if (anyDraft.stack && typeof anyDraft.stack === "object") {
-    for (const [cat, entry] of Object.entries(anyDraft.stack as Record<string, { value?: string }>)) {
+  if (draft.stack) {
+    for (const [cat, entry] of Object.entries(draft.stack)) {
       if (entry?.value) lockedStack[cat] = entry.value.toLowerCase();
     }
   }
@@ -141,6 +136,10 @@ function buildNormalizedCacheContext(draft: DraftInput): string {
     projectType: (draft.projectType ?? "").toLowerCase(),
     mustBeOffline: draft.constraints.technical?.mustBeOffline ?? false,
     compliance: [...(draft.constraints.technical?.compliance ?? [])].sort(),
+    stack: Object.entries(draft.stack ?? {})
+      .filter(([, e]) => e?.value)
+      .map(([cat, e]) => `${cat}:${(e.value as string).toLowerCase()}`)
+      .sort(),
   });
 }
 
@@ -299,15 +298,21 @@ export async function suggestForCategory(
           pricing: entry?.pricing,
           freeTier: entry?.freeTier,
           source: (entry ? "suggested" : "community") as "suggested" | "community",
-          confidence: (c.confidence ?? "low") as "high" | "low",
+          confidence: entry ? "high" : ((c.confidence ?? "low") as "high" | "low"),
         };
       });
 
+      // Dedup candidates by name (case-insensitive)
+      candidates = Array.from(
+        new Map(candidates.map((c) => [c.name.toLowerCase(), c])).values(),
+      );
+
       candidates = applyAffinityRules(category, candidates, draft);
 
+      const anyRegistryMatch = candidates.some((c) => c.source === "suggested");
       result = {
         category,
-        tier: eligibleTools.length > 0 ? "registry" : "community",
+        tier: anyRegistryMatch ? "registry" : "community",
         candidates,
       };
     } catch (err) {

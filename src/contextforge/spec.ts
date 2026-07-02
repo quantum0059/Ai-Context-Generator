@@ -7,6 +7,24 @@ export const stackEntrySchema = z.object({
   confidence: z.enum(["high", "low"]).optional(),
 });
 
+const projectConstraintsSchema = z.object({
+  mustBeOffline: z.boolean(),
+  mustUseLocalStorage: z.boolean(),
+  forbiddenCategories: z.array(z.string()),
+  forbiddenTools: z.array(z.string()),
+  requiredToolTypes: z.array(z.string()),
+  rawConstraints: z.array(z.string()),
+  compliance: z.array(z.string()).optional(),
+  budgetConstraint: z.string().optional(),
+  targetAudience: z.array(z.string()).optional(),
+});
+
+const constraintsSchema = z.object({
+  budget: z.string().optional(),
+  avoid: z.array(z.string()).optional(),
+  technical: projectConstraintsSchema.optional(),
+});
+
 export const projectSpecSchema = z.object({
   id: z.string().min(1),
   projectName: z.string().min(1),
@@ -15,10 +33,7 @@ export const projectSpecSchema = z.object({
   features: z.array(z.string().min(1)),
   requiredCategories: z.array(z.string().min(1)).min(1),
   stack: z.record(z.string(), stackEntrySchema),
-  constraints: z.object({
-    budget: z.string().optional(),
-    avoid: z.array(z.string()).optional(),
-  }),
+  constraints: constraintsSchema,
   designReferences: z.array(z.string()).optional(),
   projectSpecVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
   projectType: z.string().optional(),
@@ -32,12 +47,12 @@ export const draftInputSchema = z.object({
   description: z.string().min(10),
   platform: z.string().min(1),
   features: z.array(z.string()).default([]),
-  constraints: z
-    .object({ budget: z.string().optional(), avoid: z.array(z.string()).optional() })
-    .default({}),
+  constraints: constraintsSchema.default({}),
   designReferences: z.array(z.string()).optional(),
   projectType: z.string().optional(),
   classificationReason: z.string().optional(),
+  architecturalRequirements: z.any().optional(),
+  stack: z.record(z.string(), stackEntrySchema).optional(),
 });
 
 /**
