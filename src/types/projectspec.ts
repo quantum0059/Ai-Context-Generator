@@ -57,6 +57,14 @@ export interface SuggestionCandidate {
   confidence: Confidence;
 }
 
+export interface SuggestionResolution {
+  category: string;
+  tier: "registry" | "community";
+  candidates: SuggestionCandidate[];
+  recommendationSummary: string;
+  tradeoffs: string[];
+}
+
 /** Relative path inside the package -> file content. */
 export type PackageFiles = Record<string, string>;
 

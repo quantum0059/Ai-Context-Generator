@@ -156,6 +156,8 @@ describe("suggestion resolution", () => {
     const result = await suggestForCategory("authentication", draft);
     expect(result.tier).toBe("registry");
     expect(result.candidates.length).toBeGreaterThan(0);
+    expect(result.recommendationSummary.length).toBeGreaterThan(20);
+    expect(Array.isArray(result.tradeoffs)).toBe(true);
     for (const c of result.candidates) {
       expect(c.source).toBe("suggested");
       // Without an AI key, the heuristic fallback correctly reports low
@@ -172,6 +174,8 @@ describe("suggestion resolution", () => {
     expect(result.tier).toBe("community");
     expect(result.candidates[0].source).toBe("community");
     expect(result.candidates[0].confidence).toBe("low");
+    expect(result.recommendationSummary).toContain("quantum computing");
+    expect(result.tradeoffs[0]).toContain("Manual validation");
   });
 
   it("does not recommend a tool explicitly avoided by the user", async () => {

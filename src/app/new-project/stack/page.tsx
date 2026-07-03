@@ -25,7 +25,7 @@ import {
 } from "@/components/wizard/suggest-dialog";
 import { WizardBottomNav } from "@/components/wizard/wizard-bottom-nav";
 import { inferPlatform } from "@/lib/inferPlatform";
-import type { DiscoveredCategory, SuggestionCandidate } from "@/types/projectspec";
+import type { DiscoveredCategory, SuggestionCandidate, SuggestionResolution } from "@/types/projectspec";
 
 const CATEGORY_META: Record<string, { title: string; description: string; icon: typeof Box }> = {
   frontendFramework: { title: "Frontend Framework", description: "Application UI framework", icon: LayoutGrid },
@@ -78,6 +78,9 @@ export default function StackPage() {
   // the earlier project classification request.
   const [categories, setCategories] = useState<DiscoveredCategory[]>([]);
   const [suggestions, setSuggestions] = useState<Record<string, SuggestionOption[]>>({});
+  const [suggestionInsights, setSuggestionInsights] = useState<
+    Record<string, Pick<SuggestionResolution, "recommendationSummary" | "tradeoffs">>
+  >({});
   const [suggestCategory, setSuggestCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -176,16 +179,27 @@ export default function StackPage() {
           // Discovery already supplied grounded tools for specialized concerns.
           // Use them immediately instead of replacing them with generic AI output.
           if (category.isCustom && discoveredOptions.length > 0) {
-            return [category.key, discoveredOptions] as const;
+            return [
+              category.key,
+              discoveredOptions,
+              {
+                recommendationSummary: `${discoveredOptions[0]?.name} is the strongest default for this specialized requirement. ${discoveredOptions[0]?.rationale ?? ""}`.trim(),
+                tradeoffs: discoveredOptions.slice(1).map((option) => `${option.name}: ${option.rationale}`),
+              },
+            ] as const;
           }
           const response = await fetch("/api/contextforge/suggest", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ category: category.key, draft }),
           });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error ? JSON.stringify(data.error) : "Recommendation failed");
-          const apiOptions = (data.candidates as SuggestionCandidate[]).map((candidate) => ({
+          const data: SuggestionResolution | { error?: string } = await response.json();
+          if (!response.ok) {
+            const message = "error" in data && data.error ? JSON.stringify(data.error) : "Recommendation failed";
+            throw new Error(message);
+          }
+          const suggestionData = data as SuggestionResolution;
+          const apiOptions = (suggestionData.candidates as SuggestionCandidate[]).map((candidate) => ({
             name: candidate.name,
             rationale: candidate.rationale,
             source: candidate.source,
@@ -194,14 +208,25 @@ export default function StackPage() {
           const primaryOptions = category.isCustom ? discoveredOptions : apiOptions;
           const alternativeOptions = category.isCustom ? apiOptions : discoveredOptions;
           const names = new Set(primaryOptions.map((option) => option.name.toLowerCase()));
-          return [category.key, [...primaryOptions, ...alternativeOptions.filter((option) => !names.has(option.name.toLowerCase()))]] as const;
+          return [
+            category.key,
+            [...primaryOptions, ...alternativeOptions.filter((option) => !names.has(option.name.toLowerCase()))],
+            {
+              recommendationSummary: suggestionData.recommendationSummary,
+              tradeoffs: suggestionData.tradeoffs,
+            },
+          ] as const;
         }));
 
         if (cancelled) return;
         const nextSuggestions: Record<string, SuggestionOption[]> = Object.fromEntries(
           resolved.map(([key, options]) => [key, [...options]]),
         );
+        const nextInsights: Record<string, Pick<SuggestionResolution, "recommendationSummary" | "tradeoffs">> = Object.fromEntries(
+          resolved.map(([key, , insight]) => [key, insight]),
+        );
         setSuggestions(nextSuggestions);
+        setSuggestionInsights(nextInsights);
         for (const category of categories) {
           const top = nextSuggestions[category.key]?.[0];
           if (top && !state.stack[category.key]?.value && !state.stack[category.key]?.skipped) {
@@ -299,6 +324,8 @@ export default function StackPage() {
           onOpenChange={(open) => { if (!open) setSuggestCategory(null); }}
           categoryTitle={activeCategory.label || humanizeCategory(activeCategory.key)}
           suggestions={activeSuggestions}
+          recommendationSummary={suggestCategory ? suggestionInsights[suggestCategory]?.recommendationSummary : undefined}
+          tradeoffs={suggestCategory ? suggestionInsights[suggestCategory]?.tradeoffs : []}
           onSelect={(suggestion) => updateStackValue(
             suggestCategory,
             suggestion.name,
