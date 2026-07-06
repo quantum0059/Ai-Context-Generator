@@ -222,3 +222,41 @@ describe("Environment Validation", () => {
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 });
+
+// ─── Regression Tests ─────────────────────────────────────────────────────────
+// These tests guard specific bugs that were fixed. If either bug is ever
+// reintroduced, one of these will fail immediately — making it impossible to
+// silently break the fixed behaviour.
+
+describe("Regression: constraint-block false alarms (fix: next/remix/sveltekit added to hasBackend)", () => {
+  it("does NOT emit NO HTTP SERVER for a Next.js stack", async () => {
+    const { buildConstraintBlock } = await import("../src/contextforge/generators/shared");
+    const spec = createMockProjectSpec({
+      stack: {
+        frontendFramework: { value: "Next.js", source: "user" },
+        authentication: { value: "Clerk", source: "suggested", confidence: "high" },
+      },
+    });
+    const block = buildConstraintBlock(spec);
+    expect(block).not.toContain("NO HTTP SERVER");
+  });
+
+  it("does NOT emit NO HTTP SERVER for a Remix stack", async () => {
+    const { buildConstraintBlock } = await import("../src/contextforge/generators/shared");
+    const spec = createMockProjectSpec({
+      stack: { frontendFramework: { value: "Remix", source: "user" } },
+    });
+    const block = buildConstraintBlock(spec);
+    expect(block).not.toContain("NO HTTP SERVER");
+  });
+
+  it("DOES emit NO HTTP SERVER for a purely client-side Vite + React SPA (correct behaviour)", async () => {
+    const { buildConstraintBlock } = await import("../src/contextforge/generators/shared");
+    const spec = createMockProjectSpec({
+      stack: { frontendFramework: { value: "Vite + React", source: "user" } },
+    });
+    const block = buildConstraintBlock(spec);
+    expect(block).toContain("NO HTTP SERVER");
+  });
+});
+

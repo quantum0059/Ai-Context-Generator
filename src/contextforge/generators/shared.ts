@@ -51,15 +51,17 @@ export function buildConstraintBlock(spec: ProjectSpec): string {
     .filter((v) => v?.value)
     .map((v) => v!.value!.toLowerCase());
 
+  // Next.js, Remix, SvelteKit, and Nuxt have built-in server/API route
+  // support — they must NOT trigger the NO HTTP SERVER banner even though
+  // they are not standalone HTTP frameworks like Express or Fastify.
   const hasBackend = stackValues.some((v) =>
-    ['express', 'fastify', 'hono', 'nestjs', 'koa'].some((b) => v.includes(b))
+    ['express', 'fastify', 'hono', 'nestjs', 'koa', 'next', 'remix', 'sveltekit', 'nuxt'].some((b) => v.includes(b))
   );
   if (!hasBackend) {
     lines.push(
-      '🚫 NO HTTP SERVER: There is no Express, ' +
-      'Fastify, or any HTTP framework in this stack. ' +
-      'Do NOT generate API routes, middleware, or ' +
-      'HTTP handlers.'
+      '🚫 NO HTTP SERVER: There is no server-side framework in this stack. ' +
+      'Do NOT generate API routes, middleware, or HTTP handlers. ' +
+      'All logic must run client-side or through third-party APIs.'
     );
   }
 

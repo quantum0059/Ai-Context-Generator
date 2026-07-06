@@ -4,13 +4,15 @@ import type { ProjectSpec } from "../../../types/projectspec";
 
 describe("prompt-detector", () => {
   const baseSpec: ProjectSpec = {
+    id: "test-spec-001",
     projectName: "TestApp",
     description: "A test app",
     platform: "Web Application",
     features: ["Auth", "Dashboard"],
+    requiredCategories: ["authentication", "frontendFramework"],
     stack: {},
     constraints: {},
-    projectSpecVersion: "1.0",
+    projectSpecVersion: "1.0.0",
   };
 
   const sampleAspects: Aspect[] = [
@@ -51,7 +53,7 @@ describe("prompt-detector", () => {
     });
 
     it("strips auth aspects from offline desktop apps", () => {
-      const offlineSpec = { ...baseSpec, platform: "Desktop Application", constraints: { technical: { mustBeOffline: true } } };
+      const offlineSpec = { ...baseSpec, platform: "Desktop Application", constraints: { technical: { mustBeOffline: true, mustUseLocalStorage: false, forbiddenCategories: [], forbiddenTools: [], requiredToolTypes: [], rawConstraints: [] } } };
       const filtered = filterAspectsAgainstConstraints(sampleAspects, offlineSpec);
       expect(filtered.map(a => a.aspect)).not.toContain("authentication-integration");
     });
