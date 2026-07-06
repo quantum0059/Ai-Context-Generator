@@ -1,9 +1,26 @@
 import { claudeText, isClaudeConfigured } from "../../lib/claude";
 import type { ProjectSpec } from "../../types/projectspec";
 import { MODELS } from "../../lib/ai-models";
-import { buildConstraintBlock, buildTechCodeSnippets, buildSharedDatabaseSchema, lockedEntries, slugify } from "./shared";
+import { buildConstraintBlock, buildTechCodeSnippets, buildSharedDatabaseSchema, derivedEntitiesFromFeatures, lockedEntries, slugify } from "./shared";
 import type { Aspect } from "./prompt-detector";
 import { isPromptContentValid } from "./prompt-validator";
+
+/**
+ * Converts a hyphenated slug into a valid camelCase JS identifier.
+ * e.g. "exercise-completion-and-feedback" → "exerciseCompletionAndFeedback"
+ */
+function toIdentifier(slug: string): string {
+  return slug.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
+}
+
+/**
+ * Converts a hyphenated slug into a PascalCase component name.
+ * e.g. "gamification-features" → "GamificationFeatures"
+ */
+function toPascalCase(slug: string): string {
+  const id = toIdentifier(slug);
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
 
 /**
  * Pulls the requirement signal already computed upstream (by the
@@ -143,8 +160,13 @@ export function getAspectDeliverables(
       : usesPostgres
       ? ' row-ownership constraints,'
       : ' user-scoping enforced in every query (this database has no row-level security),';
+    // Embed the specific table names so Claude knows exactly what to create
+    const entities = derivedEntitiesFromFeatures(spec);
+    const tableList = entities.length > 0
+      ? `\n\n**Tables this schema must define:** ${entities.map(e => `\`${e.name}\``).join(', ')}. Do not invent different names — use these exactly.`
+      : '';
     return {
-      description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes,${securityNote} and migration files.`,
+      description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes,${securityNote} and migration files.${tableList}`,
       files: [`src/lib/schema/${slug}.sql`, `src/lib/migrations/001_${slug}.sql`],
     };
   }
@@ -181,13 +203,45 @@ export function getAspectAcceptanceCriteria(aspectKey: string, feature: string, 
     `No technology outside the locked stack is imported`,
     `TypeScript strict mode passes — no implicit \`any\``,
   ];
-  if (/ui|component|frontend/.test(aspectKey)) return [
-    ...base,
-    `${feature} renders correctly on ${spec.platform} — loading skeleton visible while data fetches`,
-    `Empty state shows an illustration, message, and call-to-action`,
-    `Error state shows a user-friendly message and a retry button`,
-    `All interactive elements are keyboard-accessible and meet WCAG 2.1 AA`,
-  ];
+  if (/ui|component|frontend/.test(aspectKey)) {
+    // Domain-specific criteria appended based on what the feature actually is
+    const featureLower = feature.toLowerCase();
+    const domainCriteria: string[] = [];
+    if (/gamif|xp|streak|badge|leaderboard|achievement/.test(featureLower)) {
+      domainCriteria.push('XP bar displays current points and the next-level threshold with a fill animation');
+      domainCriteria.push('Streak counter shows the consecutive-day count and resets visually if the streak is broken');
+      domainCriteria.push('Badge grid shows locked badges as greyed-out and unlocked badges in full colour with earned date');
+      domainCriteria.push('Leaderboard shows at minimum top-10 entries and highlights the current user\'s own rank');
+    }
+    if (/lesson|exercise|learn|quiz|course/.test(featureLower)) {
+      domainCriteria.push('Answer options are all displayed and exactly one can be selected at a time');
+      domainCriteria.push('Correct/incorrect feedback is shown immediately after submission with distinct visual styling');
+      domainCriteria.push('Progress indicator shows current question index out of total (e.g. "3 / 10")');
+      domainCriteria.push('Audio playback button is present and triggers audio for listening-type exercises');
+    }
+    if (/auth|login|signup|account|sign.?in|sign.?up/.test(featureLower)) {
+      domainCriteria.push('Unauthenticated users are redirected to sign-in before any protected content renders');
+      domainCriteria.push('Form validation errors appear inline next to the offending field — not in a generic banner');
+      domainCriteria.push('Social login buttons are visible and each triggers the correct OAuth provider');
+    }
+    if (/payment|billing|subscription|plan|upgrade/.test(featureLower)) {
+      domainCriteria.push('Pricing tiers are displayed side-by-side with a feature comparison table');
+      domainCriteria.push('Selected plan is highlighted and the CTA changes to reflect it');
+      domainCriteria.push('Successful payment shows a confirmation screen before redirecting to the app');
+    }
+    if (/progress|dashboard|analytics|overview/.test(featureLower)) {
+      domainCriteria.push('Key metrics (e.g. completion rate, time spent, score) are visible above the fold');
+      domainCriteria.push('Data visualisation is responsive — adapts to mobile and desktop widths without truncation');
+    }
+    return [
+      ...base,
+      `${feature} renders correctly on ${spec.platform} — loading skeleton visible while data fetches`,
+      `Empty state shows an illustration, message, and call-to-action`,
+      `Error state shows a user-friendly message and a retry button`,
+      `All interactive elements are keyboard-accessible and meet WCAG 2.1 AA`,
+      ...domainCriteria,
+    ];
+  }
   if (/api|backend|route/.test(aspectKey)) return [
     ...base,
     `POST/PUT requests validate input with Zod before touching the service layer`,
@@ -203,12 +257,17 @@ export function getAspectAcceptanceCriteria(aspectKey: string, feature: string, 
     const ownershipCriterion = usesPostgres
       ? `RLS policies prevent users from accessing other users' rows`
       : `Every query is scoped by user/owner id — no row-level security is assumed (this DB does not support it)`;
+    const entities = derivedEntitiesFromFeatures(spec);
+    const tableCriterion = entities.length > 0
+      ? `Schema defines at minimum: ${entities.map(e => `\`${e.name}\``).join(', ')} — do not use generic names like \`items\` or \`records\``
+      : `Schema defines at minimum one domain-specific table whose name reflects the feature (not a generic name like \`items\`)`;
     return [
       ...base,
       `Migration runs without error on a clean database`,
+      tableCriterion,
       ownershipCriterion,
       `All foreign keys have ON DELETE CASCADE where appropriate`,
-      `Indexes exist on columns used in WHERE clauses`,
+      `Indexes exist on all columns used in WHERE clauses`,
     ];
   }
   if (/auth/.test(aspectKey)) return [
@@ -273,8 +332,10 @@ export function getAspectTestCode(aspectKey: string, feature: string, spec: Proj
   const clearMocks = 'vi.clearAllMocks()';
 
   if (/api|backend|route/.test(aspectKey)) {
+    // Use camelCase identifier — hyphens are not valid in JS identifiers
+    const svcId = toIdentifier(slug);
     return `${runner}
-import { ${slug}Service } from '@/services/${slug}';
+import { ${svcId}Service } from '@/services/${slug}';
 
 vi.mock('@/lib/supabase/client'); // mock only at the service boundary
 
@@ -282,42 +343,44 @@ describe('${feature} service', () => {
   beforeEach(() => { ${clearMocks}; });
 
   it('returns data for an authenticated user', async () => {
-    const result = await ${slug}Service.list('user-123');
+    const result = await ${svcId}Service.list('user-123');
     expect(result).toBeDefined();
     expect(Array.isArray(result)).toBe(true);
   });
 
   it('throws when user is not authenticated', async () => {
-    await expect(${slug}Service.list('')).rejects.toThrow();
+    await expect(${svcId}Service.list('')).rejects.toThrow();
   });
 });`;
   }
 
   if (/ui|component|frontend|client/.test(aspectKey)) {
+    const viewName = toPascalCase(slug);
     return `${runner}
 import { render, screen } from '@testing-library/react';
 
 describe('${feature} — ${aspectKey}', () => {
   it('renders the primary content when data is provided', () => {
-    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View items={[{ id: '1', title: 'Example' }]} />);
+    render(<${viewName}View items={[{ id: '1', title: 'Example' }]} />);
     expect(screen.getByText('Example')).toBeInTheDocument();
   });
 
   it('shows the empty state when there is no data', () => {
-    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View items={[]} />);
+    render(<${viewName}View items={[]} />);
     expect(screen.getByRole('status')).toHaveTextContent(/no .*yet/i);
   });
 
   it('shows an error message and a retry control on failure', () => {
-    render(<${slug.replace(/(^|-)([a-z])/g, (_m, _s, c) => c.toUpperCase())}View error="Failed to load" />);
+    render(<${viewName}View error="Failed to load" />);
     expect(screen.getByText('Failed to load')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });`;
   }
 
+  const reducerId = toIdentifier(slug);
   return `${runner}
-import { ${slug}Reducer, initialState } from '@/features/${slug}/state';
+import { ${reducerId}Reducer, initialState } from '@/features/${slug}/state';
 
 describe('${feature} — ${aspectKey}', () => {
   it('starts from a well-defined initial state', () => {
@@ -326,13 +389,13 @@ describe('${feature} — ${aspectKey}', () => {
   });
 
   it('updates state in response to a successful action', () => {
-    const next = ${slug}Reducer(initialState, { type: 'loaded', payload: [{ id: '1' }] });
+    const next = ${reducerId}Reducer(initialState, { type: 'loaded', payload: [{ id: '1' }] });
     expect(next.items).toHaveLength(1);
     expect(next.error).toBeNull();
   });
 
   it('records an error when an action fails', () => {
-    const next = ${slug}Reducer(initialState, { type: 'failed', error: 'boom' });
+    const next = ${reducerId}Reducer(initialState, { type: 'failed', error: 'boom' });
     expect(next.error).toBe('boom');
   });
 });`;
@@ -357,7 +420,12 @@ export function richFallbackPrompt(
     .map(([cat, e]) => `| ${cat} | ${e.value} |`)
     .join('\n');
 
-  const constraintBlock = buildConstraintBlock(spec);
+  // API/backend aspects must NOT receive the constraint block — it would say
+  // "No HTTP SERVER" immediately before the instruction to build an API route,
+  // which directly contradicts the task. The constraint block already appears
+  // at the top of agents.md which is in the load order for every prompt.
+  const isApiAspect = /api|backend|route|server|endpoint/.test(aspect.aspect);
+  const constraintBlock = isApiAspect ? '' : buildConstraintBlock(spec);
 
   return `# Build: ${aspect.title} — ${spec.projectName}
 ${constraintBlock}

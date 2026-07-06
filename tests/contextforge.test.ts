@@ -7,6 +7,8 @@ import type { DraftInput } from "../src/types/projectspec";
 import { inferPlatform } from "../src/lib/inferPlatform";
 import { sanitizeConflictReport } from "../src/contextforge/conflicts";
 import type { ConflictReport, ProjectSpec } from "../src/types/projectspec";
+import { getAspectTestCode, getAspectAcceptanceCriteria, richFallbackPrompt } from "../src/contextforge/generators/prompt-builder";
+import { derivedEntitiesFromFeatures } from "../src/contextforge/generators/shared";
 
 const draft: DraftInput = {
   projectName: "LingoQuest",
@@ -263,3 +265,73 @@ describe("projectspec finalization and package assembly", () => {
     expect(techStack).not.toContain("@clerk/nextjs");
   });
 });
+
+// ─── Prompt-Quality Regression Tests ─────────────────────────────────────────
+// One test per prompt-quality bug. If any bug is reintroduced, one of these
+// fails immediately — making it impossible to silently re-break the fixes.
+
+describe("Prompt quality regressions", () => {
+  const lingoStack = {
+    frontendFramework: { value: "Next.js", source: "user" as const },
+    authentication: { value: "Clerk", source: "suggested" as const, confidence: "high" as const },
+    database: { value: "Supabase", source: "suggested" as const, confidence: "high" as const },
+  };
+  const lingoDraft: DraftInput = {
+    projectName: "LingoQuest",
+    description: "A Duolingo-inspired language learning app with XP, streaks, lessons, and gamification.",
+    platform: "web",
+    features: ["Gamification Features", "Interactive Language Lessons", "Exercise Completion & Feedback"],
+    constraints: {},
+  };
+  const lingoSpec = finalizeProjectSpec(lingoDraft, Object.keys(lingoStack), lingoStack);
+
+  // Bug 1 — Hyphenated feature names must not produce invalid JS identifiers
+  it("Bug 1: test code uses camelCase identifiers, not hyphenated ones", () => {
+    const code = getAspectTestCode("api-routes", "Exercise Completion & Feedback", lingoSpec);
+    // Paths like '@/services/exercise-completion-feedback' are fine (hyphens in paths are valid).
+    // The IDENTIFIER used in `import { X }` and `X.list()` must be camelCase.
+    // Check that no hyphenated name appears inside an import brace or as a call target.
+    expect(code).not.toMatch(/import \{ [^}]*-[^}]* \}/);           // no hyphens inside import { }
+    expect(code).not.toMatch(/await [a-z]+-[a-z]+\w*\./);            // no hyphenated call like foo-bar.list()
+    expect(code).toMatch(/exerciseCompletion\w+Service/);             // correct camelCase identifier present
+  });
+
+  // Bug 2 — API-route prompts must not open with a NO HTTP SERVER banner
+  it("Bug 2: API-route fallback prompt does not contain NO HTTP SERVER", () => {
+    const apiAspect = { aspect: "api-routes", title: "API Routes", description: "Backend layer" };
+    const prompt = richFallbackPrompt(lingoSpec, "Gamification Features", apiAspect, []);
+    expect(prompt).not.toContain("NO HTTP SERVER");
+  });
+
+  // Bug 3 — UI acceptance criteria must be feature-specific, not copy-paste clones
+  it("Bug 3: gamification UI criteria mention XP, streak, or badge", () => {
+    const criteria = getAspectAcceptanceCriteria("ui-components", "Gamification Features", lingoSpec);
+    expect(criteria.join(" ").toLowerCase()).toMatch(/xp|streak|badge|leaderboard/);
+  });
+
+  it("Bug 3: lesson UI criteria mention answers, progress, or audio", () => {
+    const criteria = getAspectAcceptanceCriteria("ui-components", "Interactive Language Lessons", lingoSpec);
+    expect(criteria.join(" ").toLowerCase()).toMatch(/answer|progress|audio|feedback/);
+  });
+
+  // Bug 4 — Entity derivation must produce domain-specific tables for a language-learning app
+  it("Bug 4: entity derivation includes lessons and exercises for a language app", () => {
+    const names = derivedEntitiesFromFeatures(lingoSpec).map((e: { name: string }) => e.name);
+    expect(names).toContain("lessons");
+    expect(names).toContain("exercises");
+  });
+
+  it("Bug 4: entity derivation includes xp_transactions and streaks when gamification is mentioned", () => {
+    const names = derivedEntitiesFromFeatures(lingoSpec).map((e: { name: string }) => e.name);
+    expect(names).toContain("xp_transactions");
+    expect(names).toContain("streaks");
+  });
+
+  // Bug 5 — Database-schema acceptance criteria must name the actual tables
+  it("Bug 5: database-schema criteria include specific domain table names", () => {
+    const criteria = getAspectAcceptanceCriteria("database-schema", "Interactive Language Lessons", lingoSpec);
+    expect(criteria.join(" ")).toMatch(/lessons|exercises|user_progress/);
+  });
+});
+
+

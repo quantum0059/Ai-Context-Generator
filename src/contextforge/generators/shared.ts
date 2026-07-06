@@ -646,14 +646,62 @@ export function buildSharedDatabaseSchema(spec: ProjectSpec): string {
   return `\n## Shared Database Schema\n\nUse these EXACT table and column names across ALL features. Do not invent alternatives.\n\n\`\`\`sql\n${tables}\n\`\`\`\n`;
 }
 
-function derivedEntitiesFromFeatures(spec: ProjectSpec): Array<{ name: string; columns: string[] }> {
+export function derivedEntitiesFromFeatures(spec: ProjectSpec): Array<{ name: string; columns: string[] }> {
   const entities: Array<{ name: string; columns: string[] }> = [];
   const text = (spec.features.join(' ') + ' ' + spec.description).toLowerCase();
+
+  // Universal
   if (/auth|user|profile|login/.test(text)) entities.push({ name: 'users', columns: ['name', 'email', 'avatar_url'] });
+
+  // Generic SaaS
   if (/task|todo|item|card/.test(text)) entities.push({ name: 'tasks', columns: ['title', 'description', 'status', 'priority'] });
   if (/chat|message|comment/.test(text)) entities.push({ name: 'messages', columns: ['content', 'sender_id', 'channel_id'] });
   if (/project|board|workspace/.test(text)) entities.push({ name: 'projects', columns: ['name', 'description', 'status'] });
   if (/payment|billing|subscription|invoice/.test(text)) entities.push({ name: 'subscriptions', columns: ['stripe_customer_id', 'stripe_subscription_id', 'plan', 'status'] });
   if (/channel|room|team/.test(text)) entities.push({ name: 'channels', columns: ['name', 'description', 'type'] });
+
+  // Education / language-learning
+  if (/lesson|exercise|course|learn|quiz|language|duolingo/.test(text)) {
+    entities.push({ name: 'lessons', columns: ['title', 'language_code', 'difficulty', 'content_type', 'order_index'] });
+    entities.push({ name: 'exercises', columns: ['lesson_id', 'type', 'prompt', 'correct_answer', 'options'] });
+    entities.push({ name: 'user_progress', columns: ['lesson_id', 'completed_at', 'score', 'attempts'] });
+  }
+
+  // Gamification
+  if (/xp|gamif|streak|badge|achievement|leaderboard/.test(text)) {
+    entities.push({ name: 'xp_transactions', columns: ['amount', 'reason', 'source_id'] });
+    entities.push({ name: 'streaks', columns: ['current_days', 'longest_days', 'last_activity_date'] });
+    entities.push({ name: 'badges', columns: ['badge_type', 'earned_at', 'metadata'] });
+  }
+
+  // Media / content delivery
+  if (/video|media|upload|content|asset|audio/.test(text)) {
+    entities.push({ name: 'media_items', columns: ['url', 'type', 'size_bytes', 'duration_seconds'] });
+  }
+
+  // Booking / scheduling
+  if (/booking|reservation|appointment|slot|schedule/.test(text)) {
+    entities.push({ name: 'bookings', columns: ['start_at', 'end_at', 'status', 'host_id'] });
+    entities.push({ name: 'time_slots', columns: ['host_id', 'start_at', 'duration_minutes', 'is_available'] });
+  }
+
+  // E-commerce / catalog
+  if (/product|inventory|catalog|shop|store|cart/.test(text)) {
+    entities.push({ name: 'products', columns: ['name', 'description', 'price_cents', 'stock_qty'] });
+    entities.push({ name: 'orders', columns: ['status', 'total_cents', 'stripe_payment_intent_id'] });
+  }
+
+  // Blog / CMS
+  if (/post|article|blog|cms/.test(text)) {
+    entities.push({ name: 'posts', columns: ['title', 'body', 'slug', 'published_at', 'author_id'] });
+    entities.push({ name: 'comments', columns: ['post_id', 'body', 'parent_id'] });
+  }
+
+  // Notifications
+  if (/notif|alert|push|inbox/.test(text)) {
+    entities.push({ name: 'notifications', columns: ['type', 'title', 'body', 'read_at', 'action_url'] });
+  }
+
   return entities;
 }
+
