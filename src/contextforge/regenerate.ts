@@ -1,6 +1,7 @@
 import type { PackageFiles, PackageMeta, ProjectSpec } from "../types/projectspec";
 import { projectSpecSchema } from "./spec";
 import { generateAgents } from "./generators/agents";
+import { generateContext } from "./generators/context";
 import { generateDecisions } from "./generators/decisions";
 import { generateDependencyGraph, orderFeatures } from "./generators/dependencyGraph";
 import {
@@ -161,9 +162,11 @@ export async function regeneratePackage(
   }
 
   // --- Always regenerated from the new spec ---
+  files["context.md"] = await generateContext(newSpec);
   files["agents.md"] = await generateAgents(newSpec);
   files["ai-context.json"] = generateAiContext(newSpec);
   files["README.md"] = generatePackageReadme(newSpec);
+  changed.add("context.md");
   changed.add("agents.md");
   changed.add("ai-context.json");
   changed.add("README.md");

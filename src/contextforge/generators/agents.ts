@@ -137,7 +137,8 @@ A numbered list of 8-12 specific prohibitions, each referencing a specific techn
 - 'Do not create API routes outside src/app/api/'
 
 ## Load Order for AI Sessions
-Numbered list: exactly which files from this package to load into the AI context window, in order, before starting work on any feature.
+ Numbered list: exactly which files from this package to load into the AI context window, in order, before starting work on any feature.
+ The list MUST start with context.md (product brief) and agents.md (architecture rules) and must include feature-specific files.
 
 ## Low Confidence Warnings (only if applicable)
 List any stack choices marked confidence: 'low' and tell the AI to verify their documentation before generating code using them.`;
@@ -262,11 +263,12 @@ ${lowConfSection}
 
 ## Load Order for AI Sessions
 
-1. \`agents.md\` — this file (always first)
-2. \`tech-stack.md\` — technology reference
-3. \`requirements.md\` — formal requirement document
-4. Feature-specific files from \`context-manifests/<feature>-guide.md\`
-5. Build prompts from \`prompts/<feature>/\`
+1. \`context.md\` — product brief (always first — read before anything else)
+2. \`agents.md\` — this file (architecture rules and locked stack)
+3. \`tech-stack.md\` — technology reference
+4. \`requirements.md\` — formal requirement document
+5. Feature-specific files from \`context-manifests/<feature>-guide.md\`
+6. Build prompts from \`prompts/<feature>/\`
 
 ## When stuck
 - \`tech-stack.md\` for complete technology reference, setup details, and best practices.

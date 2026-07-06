@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
+import { providerVision } from "../../lib/ai-provider";
 import { MODELS } from "../../lib/ai-models";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { lockedEntries, slugify } from "./shared";
@@ -17,12 +18,84 @@ const screensSchema = z.object({
     .max(10),
 });
 
-type ScreenInfo = {
+  type ScreenInfo = {
   name: string;
   rationale: string;
   keyElements: string[];
   userActions: string[];
+  layoutObservations?: string[];
 };
+
+/**
+ * When the user has uploaded design reference images, analyse them with
+ * Claude Vision instead of generating screens from text only.
+ *
+ * Each image URL is passed to the vision API and Claude identifies:
+ * - The screen name and its purpose in the product
+ * - Key UI elements visible in the image
+ * - Layout patterns and UX observations
+ * - Actions available to the user
+ *
+ * This ensures the generated UI references reflect the developer's actual
+ * visual intent rather than AI-invented generic patterns.
+ */
+async function analyzeDesignImages(
+  imageUrls: string[],
+  spec: ProjectSpec,
+): Promise<ScreenInfo[]> {
+  const systemPrompt = `You are an expert UI/UX analyst. The developer has uploaded screenshots or design mockups for their ${spec.platform} application "${spec.projectName}". Analyse ONLY what you can actually see in the images — do not invent elements that are not present. Return JSON only.`;
+
+  const userPrompt = `Analyse these uploaded design reference images for "${spec.projectName}" (${spec.platform}) and extract the key information.
+
+For each distinct screen or view visible in the images, identify:
+- "name": The screen/view name (infer from visible content, e.g. "Dashboard", "Login", "Product List")
+- "rationale": What purpose this screen serves in the app based on what you see
+- "keyElements": 3-6 specific UI elements you can ACTUALLY SEE (describe them precisely — e.g. "Search bar with magnifier icon", "Card grid with 3 columns", "Bottom navigation with 4 tabs")
+- "userActions": 2-4 actions the user can take on this screen based on visible controls
+- "layoutObservations": 1-3 observations about the layout, color scheme, or design patterns used
+
+Return JSON: {"screens": [{"name": "", "rationale": "", "keyElements": [], "userActions": [], "layoutObservations": []}]}
+
+If you see multiple images, treat each as a separate screen unless they clearly show the same screen in different states.`;
+
+  try {
+    const visionSchema = z.object({
+      screens: z.array(z.object({
+        name: z.string().min(1),
+        rationale: z.string().min(1),
+        keyElements: z.array(z.string()).min(1).max(8),
+        userActions: z.array(z.string()).min(1).max(6),
+        layoutObservations: z.array(z.string()).min(0).max(5).optional(),
+      })).min(1).max(12),
+    });
+
+    const raw = await providerVision(systemPrompt, userPrompt, imageUrls);
+    if (raw === null) {
+      // Provider has no vision support — fall through to text-only
+      console.log("[PromptMaterial] Vision not supported by active provider, falling back to text analysis");
+      return identifyScreens(spec);
+    }
+
+    // Extract JSON from raw vision response
+    const jsonStart = raw.indexOf("{");
+    const jsonEnd = raw.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1) throw new Error("No JSON in vision response");
+    const parsed = visionSchema.safeParse(JSON.parse(raw.slice(jsonStart, jsonEnd + 1)));
+    if (!parsed.success) throw new Error(`Vision schema validation failed: ${parsed.error.message}`);
+
+    console.log(`[PromptMaterial] Vision analysis found ${parsed.data.screens.length} screens from ${imageUrls.length} images`);
+    return parsed.data.screens.map((s) => ({
+      name: s.name,
+      rationale: s.rationale,
+      keyElements: s.keyElements,
+      userActions: s.userActions,
+      layoutObservations: s.layoutObservations ?? [],
+    }));
+  } catch (err) {
+    console.error("[PromptMaterial] Vision analysis failed, falling back to text-only:", err instanceof Error ? err.message : err);
+    return identifyScreens(spec);
+  }
+}
 
 async function identifyScreens(spec: ProjectSpec): Promise<ScreenInfo[]> {
   if (isClaudeConfigured()) {
@@ -109,7 +182,7 @@ function heuristicScreens(spec: ProjectSpec): ScreenInfo[] {
   return screens;
 }
 
-function uiReferenceContent(spec: ProjectSpec, screen: ScreenInfo): string {
+function uiReferenceContent(spec: ProjectSpec, screen: ScreenInfo, fromImages: boolean): string {
   const elementsSection = screen.keyElements
     .map((el, i) => `${i + 1}. ${el}`)
     .join("\n");
@@ -121,60 +194,16 @@ function uiReferenceContent(spec: ProjectSpec, screen: ScreenInfo): string {
   const styling = lockedEntries(spec).find(([c]) => c.toLowerCase().includes("styling"))?.[1].value;
   const framework = lockedEntries(spec).find(([c]) => c.toLowerCase().includes("framework"))?.[1].value;
 
-  return `# UI Reference: ${screen.name}
+  // If vision-derived, include the layout observations extracted from the image
+  const visualInsightsSection = fromImages && screen.layoutObservations && screen.layoutObservations.length > 0
+    ? `\n## Visual Observations (Extracted from Your Uploaded Design)\n\n> These observations were extracted by AI from the image you uploaded. They reflect what is actually visible in your reference design.\n\n${screen.layoutObservations.map((o) => `- ${o}`).join("\n")}\n`
+    : "";
 
-> **Project:** ${spec.projectName} (${spec.platform})
-> **Framework:** ${framework ?? "see agents.md"}
-> **Styling:** ${styling ?? "see agents.md"}
+  const sourceNote = fromImages
+    ? `> **Source:** Derived from developer-uploaded design reference image. Elements and layout describe what was actually seen in the design.`
+    : `> **Source:** Generated from project description and features. Replace with actual wireframes for higher fidelity.`;
 
-## Purpose
-
-${screen.rationale}
-
-## Key UI Elements
-
-${elementsSection}
-
-## User Actions
-
-${actionsSection}
-
-## Layout Guidelines
-
-### Structure
-- Top-level container must respect ${spec.platform} safe areas and navigation conventions.
-- Group related elements visually — use cards or sections with clear hierarchy.
-- Single primary action per viewport; secondary actions should be visually subordinate.
-- Empty states must include an illustration/icon, explanatory text, and a CTA to resolve.
-
-### Responsive Behavior
-${spec.platform.includes("mobile") ? `- Bottom sheet for contextual actions (not modals on mobile).
-- Pull-to-refresh on scrollable content.
-- Swipe gestures for common actions (delete, archive).
-- Touch targets minimum 44×44pt.` : `- Content max-width ~1200px centered; sidebar navigation for complex apps.
-- Stack layouts vertically on narrow viewports (< 768px).
-- Use responsive grid (12-column on desktop, single column on mobile).
-- Hover states on all interactive elements.`}
-
-### States to Implement
-- **Loading:** Skeleton screens matching the final layout shape (not spinners).
-- **Empty:** Illustration + message + CTA ("No messages yet — start a conversation").
-- **Error:** Inline error with retry action; never a dead-end.
-- **Success:** Brief confirmation toast or inline feedback; auto-dismiss after 3s.
-
-## Design Token References
-
-- **Spacing:** Follow \`prompt_material/design-system/spacing.md\` — use the 4px scale exclusively.
-- **Typography:** Follow \`prompt_material/design-system/typography.md\` — one display style per screen.
-- **Colors:** Follow \`prompt_material/design-system/colors.md\` — use semantic tokens (not raw hex).
-- **Animation:** Follow \`prompt_material/design-system/animation-guidelines.md\` for transitions.
-
-## AI Prompt Tip
-
-When asking an AI to build this screen, include this file AND the relevant
-design system files. Describe what you want to keep from reference designs
-(layout, flow, element placement) — never ask to "copy" a design.
-`;
+  return `# UI Reference: ${screen.name}\n\n${sourceNote}\n\n> **Project:** ${spec.projectName} (${spec.platform})\n> **Framework:** ${framework ?? "see agents.md"}\n> **Styling:** ${styling ?? "see agents.md"}\n\n## Purpose\n\n${screen.rationale}\n\n## Key UI Elements\n\n${elementsSection}\n\n## User Actions\n\n${actionsSection}${visualInsightsSection}\n## Layout Guidelines\n\n### Structure\n- Top-level container must respect ${spec.platform} safe areas and navigation conventions.\n- Group related elements visually — use cards or sections with clear hierarchy.\n- Single primary action per viewport; secondary actions should be visually subordinate.\n- Empty states must include an illustration/icon, explanatory text, and a CTA to resolve.\n\n### Responsive Behavior\n${spec.platform.includes("mobile") ? `- Bottom sheet for contextual actions (not modals on mobile).\n- Pull-to-refresh on scrollable content.\n- Swipe gestures for common actions (delete, archive).\n- Touch targets minimum 44×44pt.` : `- Content max-width ~1200px centered; sidebar navigation for complex apps.\n- Stack layouts vertically on narrow viewports (< 768px).\n- Use responsive grid (12-column on desktop, single column on mobile).\n- Hover states on all interactive elements.`}\n\n### States to Implement\n- **Loading:** Skeleton screens matching the final layout shape (not spinners).\n- **Empty:** Illustration + message + CTA ("No messages yet — start a conversation").\n- **Error:** Inline error with retry action; never a dead-end.\n- **Success:** Brief confirmation toast or inline feedback; auto-dismiss after 3s.\n\n## Design Token References\n\n- **Spacing:** Follow \`prompt_material/design-system/spacing.md\` — use the 4px scale exclusively.\n- **Typography:** Follow \`prompt_material/design-system/typography.md\` — one display style per screen.\n- **Colors:** Follow \`prompt_material/design-system/colors.md\` — use semantic tokens (not raw hex).\n- **Animation:** Follow \`prompt_material/design-system/animation-guidelines.md\` for transitions.\n\n## AI Prompt Tip\n\nWhen asking an AI to build this screen, include this file AND the relevant\ndesign system files.${fromImages ? " Since this reference was derived from your uploaded design, ask the AI to \"match the layout and visual patterns described in this file\" rather than inventing new ones." : " Describe what you want to keep from reference designs (layout, flow, element placement) — never ask to \"copy\" a design."}\n`;
 }
 
 function designSystemFiles(spec: ProjectSpec): PackageFiles {
@@ -442,17 +471,37 @@ export async function generatePromptMaterial(spec: ProjectSpec): Promise<Package
   const paradigm = detectPlatformParadigm(spec);
 
   // Projects with no GUI (CLI, backend-only) get NO design material at all.
-  // Emitting UI references, wireframes, and design-system tokens for a CLI
-  // was a primary source of hallucinated web concepts in generated packages.
   if (!paradigm.hasUI) {
     return files;
   }
 
-  const screens = await identifyScreens(spec);
+  // ─── Screen identification ─────────────────────────────────────────────────
+  // If the user uploaded design reference images: analyse them with AI Vision
+  // to extract real screen names, elements, layout patterns, and UX notes.
+  // Only fall back to text-based screen generation when no images are present.
+  const uploadedImageUrls = (spec.designReferences ?? []).filter((r) =>
+    r.includes("res.cloudinary.com") || r.startsWith("https://")
+  );
+  const hasUploadedImages = uploadedImageUrls.length > 0;
+
+  let screens: ScreenInfo[];
+  let fromImages = false;
+
+  if (hasUploadedImages) {
+    console.log(`[PromptMaterial] ${uploadedImageUrls.length} uploaded image(s) found — using vision analysis instead of text-only prompts`);
+    screens = await analyzeDesignImages(uploadedImageUrls, spec);
+    fromImages = true;
+  } else {
+    console.log("[PromptMaterial] No uploaded images — generating UI references from project description");
+    screens = await identifyScreens(spec);
+    fromImages = false;
+  }
+
+  // Generate one UI reference file per screen
   screens.forEach((screen, i) => {
     const num = String(i + 1).padStart(2, "0");
     files[`prompt_material/ui-references/${num}-${slugify(screen.name)}.md`] =
-      uiReferenceContent(spec, screen);
+      uiReferenceContent(spec, screen, fromImages);
   });
 
   Object.assign(files, designSystemFiles(spec));

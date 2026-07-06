@@ -125,11 +125,12 @@ Generated from ProjectSpec version ${spec.projectSpecVersion}.
 
 ## 🚀 Quick Start
 
-1. **Read the constitution** → Open \`agents.md\` — this is the single source of truth for your project's architecture and rules. Always load this file first.
-2. **Check your stack** → Open \`tech-stack.md\` for a complete reference of every technology, why it was chosen, and how to set it up.
-3. **Pick a feature to build** → Open \`roadmap.md\` to see the recommended build order.
-4. **Load the prompt** → Go to \`prompts/<feature>/\` and paste the prompt into your AI assistant. It contains all the context needed.
-5. **Follow the guides** → Each feature has a guide in \`context-manifests/\` explaining exactly which files to load.
+1. **Read the product brief** → Open \`context.md\` — this is the first file every AI agent must read. It defines what the product is, who it is for, and what success looks like.
+2. **Read the constitution** → Open \`agents.md\` — this defines the architecture rules, locked stack, and coding conventions.
+3. **Check your stack** → Open \`tech-stack.md\` for a complete reference of every technology, why it was chosen, and how to set it up.
+4. **Pick a feature to build** → Open \`roadmap.md\` to see the recommended build order.
+5. **Load the prompt** → Go to \`prompts/<feature>/\` and paste the prompt into your AI assistant. It contains all the context needed.
+6. **Follow the guides** → Each feature has a guide in \`context-manifests/\` explaining exactly which files to load.
 
 ---
 
@@ -137,7 +138,8 @@ Generated from ProjectSpec version ${spec.projectSpecVersion}.
 
 | File / Folder | What It Is | When to Use It |
 |---|---|---|
-| \`agents.md\` | Project constitution — architecture rules, locked stack, coding conventions | **Always load this first** in every AI session |
+| \`context.md\` | Product brief — what the product is, who it's for, user journeys, domain glossary, and business rules | **Always load this first** — before agents.md and before any feature prompt |
+| \`agents.md\` | Project constitution — architecture rules, locked stack, coding conventions | **Always load this second** in every AI session |
 | \`tech-stack.md\` | Complete reference for every technology — setup, env vars, best practices | When you need setup or usage details for any tool |
 | \`tech-stack.json\` | Machine-readable version of the tech stack | For automated tooling or AI context injection |
 | \`roadmap.md\` | Build order with phases and dependencies | Before starting a new feature |
@@ -177,7 +179,8 @@ ${stackTable || "| _No stack entries_ | | |"}
 
 ## 💡 Tips for Best Results
 
-- **Always load \`agents.md\` first** — it's the constitution that keeps your AI assistant on track.
+- **Always load \`context.md\` first** — it grounds the AI agent in the product vision so every implementation decision is aligned with what the product actually does and who it serves.
+- **Then load \`agents.md\`** — it's the constitution that keeps your AI assistant on track with architecture rules.
 - **One feature at a time** — follow \`roadmap.md\` order. Each feature builds on the previous one.
 - **Use the prompts as-is** — they're designed to be self-contained. Just copy-paste into your AI assistant.
 - **Don't skip the tests** — every prompt includes testing requirements. Catch bugs early.

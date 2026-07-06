@@ -557,11 +557,12 @@ ${constraintBlock}
 
 Load these files into your AI assistant **before** starting this aspect:
 
-1. \`agents.md\` — project constitution (always required)
-2. \`tech-stack.md\` — technology reference with setup details
-3. \`context-manifests/${slugify(feature)}-guide.md\` — feature guide
-4. \`decisions/\` — ADRs for why each technology was chosen
-5. \`templates/service-template.md\` — service layer pattern
+1. \`context.md\` — product brief (read this first — understand the product before writing code)
+2. \`agents.md\` — project constitution (architecture rules and locked stack)
+3. \`tech-stack.md\` — technology reference with setup details
+4. \`context-manifests/${slugify(feature)}-guide.md\` — feature guide
+5. \`decisions/\` — ADRs for why each technology was chosen
+6. \`templates/service-template.md\` — service layer pattern
 
 ---
 
@@ -705,7 +706,10 @@ Generate the complete implementation prompt for this aspect. Structure it exactl
 # Build: ${aspect.title}
 
 ## Context
-Which files to load before starting this aspect (from the context package).
+List files to load before starting, in this exact order:
+1. \`context.md\` — product brief (always first)
+2. \`agents.md\` — architecture rules and locked stack
+3. Other relevant files from this context package.
 
 ## Dependencies
 List features that must already be built: ${priorFeatures.join(', ') || 'None'}

@@ -1,6 +1,7 @@
 import type { PackageFiles, PackageMeta, ProjectSpec } from "../types/projectspec";
 import { projectSpecSchema } from "./spec";
 import { generateAgents } from "./generators/agents";
+import { generateContext } from "./generators/context";
 import { generateDecisions } from "./generators/decisions";
 import { generateDependencyGraph, generateDependencyGraphJson, orderFeatures } from "./generators/dependencyGraph";
 import {
@@ -70,6 +71,7 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
       path.startsWith("decisions/") ||
       path === "tech-stack.md" ||
       path === "agents.md" ||
+      path === "context.md" ||
       path === "requirements.md";
     if (isAgentFacing) {
       const placeholder = placeholderTokens.find((token) => content.includes(token));
@@ -113,6 +115,9 @@ function assertNoGenericContent(spec: ProjectSpec, files: PackageFiles): void {
   if (!files["agents.md"]?.includes(spec.projectName)) {
     throw new Error("Generic content violation: agents.md does not reference the project name");
   }
+  if (!files["context.md"]?.includes(spec.projectName)) {
+    throw new Error("Generic content violation: context.md does not reference the project name");
+  }
 
   // Report quality failures as warnings (not exceptions) — allows demo without AI key
   if (qualityFailures.length > 0) {
@@ -144,10 +149,12 @@ export async function assemblePackage(
   const ordered = await orderFeatures(validated);
 
   // ─── Phase 1: Constitutional documents ───────────────────────────────────
-  // agents.md is AI-generated; generateTemplates() is synchronous (no AI).
-  // Both must finish before any downstream generator runs.
-  console.log("[Generator] 15% generating — Building project constitution (agents.md + templates)...");
-  const [agentsContent, templateFiles] = await Promise.all([
+  // context.md (product brief) and agents.md (architecture constitution) are
+  // both AI-generated in parallel and must finish before any downstream
+  // generator runs. context.md is listed first in every agent load order.
+  console.log("[Generator] 15% generating — Building product context (context.md + agents.md + templates)...");
+  const [contextContent, agentsContent, templateFiles] = await Promise.all([
+    generateContext(validated),
     generateAgents(validated),
     Promise.resolve(generateTemplates(validated)), // pure function — wrap for symmetry
   ]);
@@ -175,6 +182,9 @@ export async function assemblePackage(
 
   const files: PackageFiles = {
     "README.md": generatePackageReadme(validated),
+    // context.md is listed first so it appears at the top of every file browser
+    // and is the unambiguous first file an AI agent should open.
+    "context.md": contextContent,
     "agents.md": agentsContent,
     "requirements.md": generateRequirementsDoc(validated),
     "architecture.md": generateArchitecture(validated),

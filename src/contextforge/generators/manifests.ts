@@ -133,6 +133,8 @@ export async function generateManifests(
     const relevant = relevantCategoriesForFeature(spec, feature);
 
     const requiredContext: string[] = [
+      // context.md is always first — product brief before architecture rules
+      "context.md",
       "agents.md",
       "tech-stack.md",
       ...relevant.map((category) => decisionFileName(spec, category)),
@@ -149,10 +151,13 @@ export async function generateManifests(
     files[`context-manifests/${featureSlug}.json`] = JSON.stringify(jsonManifest, null, 2) + "\n";
 
     // Human-readable feature guide
-    const contextList = uniqueContext
+    // context.md and agents.md are always rendered as explicit steps 1 and 2;
+    // the rest of the context list (decisions, prompts, UI refs) follows.
+    const supplementaryContext = uniqueContext
+      .filter((p) => p !== "context.md" && p !== "agents.md" && p !== "tech-stack.md")
       .map((path) => {
         const description = describeFile(path, spec, relevant);
-        return `1. **\`${path}\`** — ${description}`;
+        return `4. **\`${path}\`** — ${description}`;
       })
       .join("\n");
 
@@ -169,12 +174,16 @@ export async function generateManifests(
 
     files[`context-manifests/${featureSlug}-guide.md`] = `# Feature Guide: ${feature}
 
-> Load the files below into your AI assistant before working on this feature.
-> This ensures the assistant has all the context it needs to build correctly.
+> Load the files below into your AI assistant **in order** before working on this feature.
+> Reading \`context.md\` first ensures the agent understands the product vision before
+> applying architecture rules from \`agents.md\` and the feature-specific prompt.
 
-## Before You Start
+## Before You Start — Load in This Order
 
-${contextList}
+1. **\`context.md\`** — Product brief (ALWAYS first — what the product is, who it's for, domain glossary, business rules)
+2. **\`agents.md\`** — Architecture rules and locked tech stack (architecture constitution)
+3. **\`tech-stack.md\`** — Complete technology reference with setup, env vars, and best practices
+${supplementaryContext}
 
 ## Build Prompts
 
