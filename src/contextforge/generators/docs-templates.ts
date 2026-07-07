@@ -1,5 +1,5 @@
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
-import { lockedEntries } from "./shared";
+import { lockedEntries, derivedEntitiesFromFeatures } from "./shared";
 import { detectPlatformParadigm } from "./platform";
 
 export function generateTemplates(spec: ProjectSpec): PackageFiles {
@@ -14,6 +14,11 @@ export function generateTemplates(spec: ProjectSpec): PackageFiles {
   // derailed CLI and backend-only projects. We now emit only the templates
   // that match the project's paradigm.
   const paradigm = detectPlatformParadigm(spec);
+
+  const entities = derivedEntitiesFromFeatures(spec);
+  const domainEntity = entities[0]?.name ?? "Item";
+  const entityLower = domainEntity.toLowerCase();
+  const entityField = entities[0]?.columns.find(c => c !== 'id' && c !== 'createdAt' && c !== 'updatedAt') ?? "title";
 
   const templates: PackageFiles = {};
 
@@ -162,51 +167,52 @@ export function use<Resource>(filters?: Filters): Use<Resource>Result {
 \`\`\`typescript
 ${state.toLowerCase().includes("zustand") ? `import { create } from "zustand";
 
-interface Todo {
+interface ${domainEntity} {
   id: string;
-  title: string;
-  completed: boolean;
+  ${entityField}: string;
+  status: string;
 }
 
-interface TodoStore {
+interface ${domainEntity}Store {
   // --- State ---
-  todos: Todo[];
+  ${entityLower}s: ${domainEntity}[];
   isLoading: boolean;
   error: string | null;
 
   // --- Actions ---
-  addTodo: (title: string) => void;
-  toggleTodo: (id: string) => void;
-  removeTodo: (id: string) => void;
+  add${domainEntity}: (${entityField}: string) => void;
+  update${domainEntity}Status: (id: string, status: string) => void;
+  remove${domainEntity}: (id: string) => void;
   setError: (error: string | null) => void;
 }
 
-export const useTodoStore = create<TodoStore>((set) => ({
+export const use${domainEntity}Store = create<${domainEntity}Store>((set) => ({
   // Initial state
-  todos: [],
+  ${entityLower}s: [],
   isLoading: false,
   error: null,
 
   // Actions (always inside the store, never outside)
-  addTodo: (title) =>
+  add${domainEntity}: (${entityField}) =>
     set((state) => ({
-      todos: [...state.todos, { id: crypto.randomUUID(), title, completed: false }],
+      ${entityLower}s: [...state.${entityLower}s, { id: crypto.randomUUID(), ${entityField}, status: 'pending' }],
     })),
 
-  toggleTodo: (id) =>
+  update${domainEntity}Status: (id, status) =>
     set((state) => ({
-      todos: state.todos.map((t) =>
-        t.id === id ? { ...t, completed: !t.completed } : t
+      ${entityLower}s: state.${entityLower}s.map((t) =>
+        t.id === id ? { ...t, status } : t
       ),
     })),
 
-  removeTodo: (id) =>
+  remove${domainEntity}: (id) =>
     set((state) => ({
-      todos: state.todos.filter((t) => t.id !== id),
+      ${entityLower}s: state.${entityLower}s.filter((t) => t.id !== id),
     })),
 
   setError: (error) => set({ error }),
 }));` : `// Use ${state} patterns — see its official docs for the exact API.
+
 // Key rules:
 // - One store per domain
 // - Actions live inside the store definition
@@ -485,43 +491,43 @@ function mapToRow(resource: <Resource>): DbRow { /* ... */ }
 
 \`\`\`typescript
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTodo, deleteTodo } from "@/services/todo";
+import { create${domainEntity}, delete${domainEntity} } from "@/services/${entityLower}";
 
 // Mock ONLY at the service boundary
 vi.mock("@/lib/database", () => ({
   query: vi.fn(),
 }));
 
-describe("createTodo", () => {
+describe("create${domainEntity}", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   // ✅ Happy path
-  it("creates a todo and returns the domain object", async () => {
+  it("creates a ${entityLower} and returns the domain object", async () => {
     // Arrange
-    const input = { title: "Buy milk", userId: "user-1" };
-    mockDb.query.mockResolvedValueOnce({ id: "todo-1", ...input });
+    const input = { ${entityField}: "Test value", userId: "user-1" };
+    mockDb.query.mockResolvedValueOnce({ id: "${entityLower}-1", ...input });
 
     // Act
-    const result = await createTodo(input);
+    const result = await create${domainEntity}(input);
 
     // Assert
     expect(result).toEqual({
-      id: "todo-1",
-      title: "Buy milk",
+      id: "${entityLower}-1",
+      ${entityField}: "Test value",
       userId: "user-1",
     });
     expect(mockDb.query).toHaveBeenCalledOnce();
   });
 
   // ❌ Failure path
-  it("throws ValidationError for empty title", async () => {
+  it("throws ValidationError for empty ${entityField}", async () => {
     // Arrange
-    const input = { title: "", userId: "user-1" };
+    const input = { ${entityField}: "", userId: "user-1" };
 
     // Act & Assert
-    await expect(createTodo(input)).rejects.toThrow("Title is required");
+    await expect(create${domainEntity}(input)).rejects.toThrow("${entityField.charAt(0).toUpperCase() + entityField.slice(1)} is required");
   });
 
   // 🔄 Edge case
@@ -530,7 +536,7 @@ describe("createTodo", () => {
     mockDb.query.mockRejectedValueOnce(new Error("Connection timeout"));
 
     // Act & Assert
-    await expect(createTodo({ title: "Test" })).rejects.toThrow("Connection timeout");
+    await expect(create${domainEntity}({ ${entityField}: "Test" })).rejects.toThrow("Connection timeout");
   });
 });
 \`\`\`
@@ -542,7 +548,7 @@ describe("createTodo", () => {
 - [ ] Edge cases for critical paths (null inputs, timeouts, concurrent access)
 - [ ] Mock ONLY at the service boundary — never mock implementation details
 - [ ] Tests are independent — no shared mutable state between tests
-- [ ] Descriptive test names: "creates a todo and returns the domain object"
+- [ ] Descriptive test names: "creates a ${entityLower} and returns the domain object"
 - [ ] \`beforeEach\` clears mocks to prevent test pollution
 `;
 

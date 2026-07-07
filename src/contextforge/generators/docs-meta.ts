@@ -53,27 +53,56 @@ export function generateRoadmap(
   ordered: Array<{ feature: string; reason: string }>,
 ): string {
   const phases: string[] = [];
+  const locked = lockedEntries(spec);
+  const hasPrisma = locked.some(([, e]) => e.value.toLowerCase().includes('prisma'));
+  const hasDrizzle = locked.some(([, e]) => e.value.toLowerCase().includes('drizzle'));
+  const hasSupabase = locked.some(([, e]) => e.value.toLowerCase().includes('supabase'));
+  const hasVitest = locked.some(([, e]) => e.value.toLowerCase().includes('vitest'));
+  const hasJest = locked.some(([, e]) => e.value.toLowerCase().includes('jest'));
+  const hasExpo = locked.some(([, e]) => e.value.toLowerCase().includes('expo'));
+  const hasNext = locked.some(([, e]) => e.value.toLowerCase().includes('next'));
+  const testCmd = hasVitest ? '`npx vitest run`' : hasJest ? '`npx jest`' : '`npm test`';
+  const dbSetupCmd = hasPrisma ? '`npx prisma migrate dev`' : hasDrizzle ? '`npx drizzle-kit push`' : hasSupabase ? '`supabase db push`' : null;
+
   phases.push(`## Phase 1: Foundation & Setup
 
 **Goals**
 - Bootstrap ${spec.projectName} for ${spec.platform} with the locked stack
-- Run \`setup/install.sh\` (or \`install.ps1\`); adopt \`agents.md\`
+- Run \`setup/install.sh\` (or \`install.ps1\`); configure \`.env.local\` from \`setup/.env.example\`
+- Adopt \`agents.md\` as the AI development constitution
 
 **Deliverables**
-- Running skeleton, configured tooling, CI basics
+- Skeleton project compiles without errors${hasNext ? ': `npm run build` passes' : hasExpo ? ': `npx expo export` passes' : ''}
+${dbSetupCmd ? `- Database schema initialised: ${dbSetupCmd} succeeds` : '- Data layer configured and connection verified'}
+- All required environment variables in \`.env.local\` and validated at startup
+- ${testCmd} runs with zero failures (even if no tests yet)
+- \`agents.md\` and \`context.md\` checked into the repository root
 
 **Dependencies**
 - None`);
 
   ordered.forEach((o, i) => {
+    const featureSlug = slugify(o.feature);
+    const ft = o.feature.toLowerCase();
+    // Derive feature-specific deliverables from keywords
+    const specificDeliverables: string[] = [];
+    if (/auth|login|sign/.test(ft)) specificDeliverables.push(`- Auth middleware protecting all private routes — unauthenticated requests return 401`);
+    if (/payment|billing|stripe/.test(ft)) specificDeliverables.push(`- Stripe webhook handler at \`/api/webhooks/stripe\` with signature verification`);
+    if (/database|schema|migration/.test(ft)) specificDeliverables.push(dbSetupCmd ? `- Migration applied: ${dbSetupCmd}` : '- Schema deployed to the data layer');
+    if (/ui|component|screen|page/.test(ft)) specificDeliverables.push(`- Loading, empty, and error states implemented for all new screens`);
+    if (/api|endpoint|route/.test(ft)) specificDeliverables.push(`- All new endpoints return typed responses matching \`src/types/${featureSlug}.ts\``);
+
     phases.push(`## Phase ${i + 2}: ${o.feature}
 
 **Goals**
 - ${o.reason}
-- Implement using \`prompts/${slugify(o.feature)}/\` with \`context-manifests/${slugify(o.feature)}.json\`
+- Implement using \`prompts/${featureSlug}/\` with \`context-manifests/${featureSlug}.json\`
 
 **Deliverables**
-- Working "${o.feature}" on ${spec.platform}, with tests
+- Working "${o.feature}" on ${spec.platform}, verified end-to-end
+${specificDeliverables.join('\n') || `- Service layer at \`src/services/${featureSlug}.ts\` — no SDK imports outside this file`}
+- All public functions in \`src/services/${featureSlug}.ts\` covered by unit tests: ${testCmd} passes
+- Relevant ADR in \`decisions/\` committed before any architecture choices are made
 
 **Dependencies**
 - ${i === 0 ? "Phase 1: Foundation & Setup" : `Phase ${i + 1}: ${ordered[i - 1].feature}`}`);
@@ -82,10 +111,13 @@ export function generateRoadmap(
   phases.push(`## Phase ${ordered.length + 2}: Production Readiness
 
 **Goals**
-- Monitoring, performance, release pipeline
+- Monitoring, performance, and release pipeline
 
 **Deliverables**
-- Error tracking live, deployment documented
+- Error tracking configured (Sentry or equivalent) — every unhandled exception surfaces an alert
+- Performance audit complete: ${hasNext ? 'Lighthouse score ≥ 90 on desktop' : hasExpo ? 'Expo build passes and loads in < 3s on device' : 'Core user flows complete in < 2s'}
+- Deployment documented in \`setup/setup-guide.md\`
+- All secrets rotated and confirmed present in the production environment
 
 **Dependencies**
 - ${ordered.length ? `Phase ${ordered.length + 1}: ${ordered[ordered.length - 1].feature}` : "Phase 1: Foundation & Setup"}`);
@@ -97,6 +129,7 @@ Phase order is driven by \`dependency-graph.md\`.
 ${phases.join("\n\n")}
 `;
 }
+
 
 export function generatePackageReadme(spec: ProjectSpec): string {
   const stackTable = lockedEntries(spec)

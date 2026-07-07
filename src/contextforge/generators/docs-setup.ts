@@ -265,17 +265,32 @@ fi
 echo ""
 echo "✅ Setup complete! Start the dev server with: ${startCmd}"
 `,
-    "setup/install.ps1": `Write-Host "Installing the locked stack for ${spec.projectName}..."
+    "setup/install.ps1": `# ── Prerequisites ─────────────────────────────────────────────────────────────
+Write-Host "Checking prerequisites for ${spec.projectName}..."
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Error "Node.js is not installed. Install it from https://nodejs.org (LTS recommended)"
+  exit 1
+}
+$nodeVer = (node -v).TrimStart('v').Split('.')[0]
+if ([int]$nodeVer -lt 18) {
+  Write-Error "Node.js 18+ required. Current: $(node -v)"
+  exit 1
+}
+Write-Host "Node.js $(node -v) is installed." -ForegroundColor Green
+
+# ── Install dependencies ───────────────────────────────────────────────────────
+Write-Host "Installing the locked stack for ${spec.projectName}..."
 ${[...commands, ...unknownLines].join("\n") || "Write-Host 'No install commands - stack has no locked entries.'"}
 
+# ── Environment variables ─────────────────────────────────────────────────────
 if (-not (Test-Path .env.local)) {
   Copy-Item setup/.env.example .env.local
-  Write-Host "Created .env.local from setup/.env.example - fill in your API keys"
+  Write-Host "Created .env.local from setup/.env.example - fill in your API keys" -ForegroundColor Green
 } else {
-  Write-Host ".env.local already exists - skipping copy"
+  Write-Host ".env.local already exists - skipping copy" -ForegroundColor Yellow
 }
 
-Write-Host "Done. Start the dev server with: ${startCmd}"
+Write-Host "Done. Start the dev server with: ${startCmd}" -ForegroundColor Green
 `,
     "setup/.env.example": `# Environment Variables — ${spec.projectName}
 # Copy this file to .env.local and fill in the values.

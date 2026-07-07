@@ -146,29 +146,83 @@ function heuristicJourneys(spec: ProjectSpec): ContextData["coreUserJourneys"] {
 function heuristicGlossary(spec: ProjectSpec): ContextData["domainGlossary"] {
   const text = `${spec.description} ${spec.features.join(" ")}`.toLowerCase();
   const terms: ContextData["domainGlossary"] = [
-    {
-      term: spec.projectName,
-      definition: spec.description,
-    },
+    { term: spec.projectName, definition: spec.description },
   ];
 
-  if (/workspace|organisation|org/.test(text)) {
-    terms.push({ term: "Workspace", definition: "A shared environment belonging to a team or organisation. All members see the same data within a workspace." });
+  // ── Education / e-learning ────────────────────────────────────────────
+  if (/lesson|course|quiz|tutor|learn|study|exercise|curriculum|flashcard|lecture/.test(text)) {
+    terms.push({ term: "Lesson", definition: "A structured unit of learning content containing explanations, examples, and exercises. Lessons are the primary content type the learner works through sequentially." });
+    terms.push({ term: "Exercise", definition: "An interactive task within a lesson that requires the learner to demonstrate understanding. Exercises are graded and feed into progress tracking." });
+    terms.push({ term: "Progress", definition: "A record of which lessons a learner has started, completed, and scored on. Progress persists across sessions and drives the learner's journey state." });
   }
-  if (/project|board/.test(text)) {
+  // ── Gamification ──────────────────────────────────────────────────────
+  if (/xp|streak|badge|leaderboard|level|achievement|reward|point|gamif/.test(text)) {
+    terms.push({ term: "XP (Experience Points)", definition: "A numeric currency awarded for completing actions. XP accumulates to determine the user's current level and drives progression." });
+    terms.push({ term: "Streak", definition: "A consecutive-day count of user activity. Breaking a streak resets the counter to zero. Streaks are the primary daily retention mechanism." });
+    terms.push({ term: "Leaderboard", definition: "A ranked list of users by XP or activity within a defined time window (daily, weekly, all-time). Drives competitive motivation." });
+  }
+  // ── Fitness / health ──────────────────────────────────────────────────
+  if (/workout|exercise|fitness|health|nutrition|calories|weight|run|gym|training|set|rep/.test(text)) {
+    terms.push({ term: "Workout", definition: "A structured session composed of exercises with defined sets, reps, and rest periods. The primary unit of training activity." });
+    terms.push({ term: "Exercise", definition: "A named movement (e.g. Squat, Push-up) with a specific set of parameters (sets, reps, weight). The atomic building block of a workout." });
+    terms.push({ term: "Personal Record (PR)", definition: "The user's best performance on a given exercise. PRs are tracked automatically and celebrated when broken." });
+  }
+  // ── Finance / fintech ─────────────────────────────────────────────────
+  if (/budget|expense|transaction|invoice|account|balance|portfolio|investment|spend|income/.test(text)) {
+    terms.push({ term: "Transaction", definition: "A single financial event (debit or credit) associated with an account. Transactions are the atomic unit of financial data." });
+    terms.push({ term: "Account", definition: "A tracked financial account (bank, credit card, investment). One user may have many accounts; the balance is derived from its transactions." });
+    terms.push({ term: "Budget", definition: "A user-defined spending limit for a category over a time period. The system compares actual spend against the budget and surfaces alerts." });
+  }
+  // ── E-commerce / marketplace ──────────────────────────────────────────
+  if (/product|cart|order|checkout|inventory|sku|listing|seller|buyer|shop/.test(text)) {
+    terms.push({ term: "Product", definition: "A sellable item with a title, description, price, and inventory count. Products can have variants (size, colour)." });
+    terms.push({ term: "Order", definition: "A confirmed purchase containing one or more line items. Orders progress through statuses: pending → processing → shipped → delivered." });
+    terms.push({ term: "Cart", definition: "A temporary container for products a buyer intends to purchase. Carts expire if not checked out within a configured time window." });
+  }
+  // ── Social / community ────────────────────────────────────────────────
+  if (/post|feed|follow|like|comment|share|profile|social|community|forum/.test(text)) {
+    terms.push({ term: "Post", definition: "A piece of user-generated content published to the feed. Posts can be liked, commented on, and shared." });
+    terms.push({ term: "Feed", definition: "A personalised, chronologically or algorithmically ordered stream of posts from accounts the user follows." });
+    terms.push({ term: "Follow", definition: "A directional relationship where User A subscribes to User B's posts. Following is unidirectional — B does not automatically follow back." });
+  }
+  // ── Media / streaming ─────────────────────────────────────────────────
+  if (/video|audio|podcast|stream|playlist|episode|media|player|watch|listen/.test(text)) {
+    terms.push({ term: "Episode", definition: "A single playable media unit within a series or podcast. Episodes have a duration, transcript, and play position saved per user." });
+    terms.push({ term: "Playlist", definition: "A user-curated or system-generated ordered list of episodes or tracks." });
+    terms.push({ term: "Watch History", definition: "The record of which episodes a user has started or completed, including the last playback position for resumption." });
+  }
+  // ── Project management / productivity ─────────────────────────────────
+  if (/workspace|project|board|task|sprint|kanban|ticket|issue|todo|milestone/.test(text)) {
+    terms.push({ term: "Workspace", definition: "A shared environment belonging to a team or organisation. All members see the same projects within a workspace." });
     terms.push({ term: "Project", definition: "A container for a discrete unit of work within a workspace. Projects have their own members, settings, and timeline." });
+    terms.push({ term: "Task", definition: "The smallest unit of trackable work. Tasks belong to a project, can be assigned to members, and have a status and due date." });
   }
-  if (/task|todo|item|card/.test(text)) {
-    terms.push({ term: "Task", definition: "The smallest unit of trackable work. Tasks belong to a project and can be assigned to members." });
+  // ── Developer tools / API ─────────────────────────────────────────────
+  if (/api.?key|endpoint|webhook|sdk|cli|integration|developer|token|request/.test(text)) {
+    terms.push({ term: "API Key", definition: "A credential that authenticates requests to the API. Keys are scoped to a project and can be revoked independently." });
+    terms.push({ term: "Webhook", definition: "An HTTP callback sent to a user-configured URL when a specific event occurs. The receiving server must verify the signature before processing." });
+    terms.push({ term: "Rate Limit", definition: "A cap on how many API requests a single key can make within a time window. Exceeded limits return HTTP 429 with a Retry-After header." });
   }
-  if (/member|team|user/.test(text)) {
-    terms.push({ term: "Member", definition: "A user who belongs to a workspace and has been granted a role (owner, admin, or member)." });
+  // ── Food / restaurant ─────────────────────────────────────────────────
+  if (/recipe|ingredient|meal|menu|restaurant|food|diet|nutrition|cook/.test(text)) {
+    terms.push({ term: "Recipe", definition: "A structured document containing an ingredient list, step-by-step instructions, and serving metadata. The primary content type." });
+    terms.push({ term: "Ingredient", definition: "A food item with a quantity and unit used in a recipe. Ingredients are normalised to support substitution and scaling." });
   }
-  if (/subscription|plan/.test(text)) {
-    terms.push({ term: "Plan", definition: "The billing tier a workspace is on (Free, Pro, Enterprise). Plans control which features are available." });
+  // ── Real estate ───────────────────────────────────────────────────────
+  if (/property|listing|rent|mortgage|tenant|landlord|lease|real.?estate/.test(text)) {
+    terms.push({ term: "Listing", definition: "A property advertised for sale or rent. Listings have a status (active, pending, sold/rented) and belong to an owner or agent." });
+    terms.push({ term: "Application", definition: "A tenant's formal request to rent a property. Applications have a status workflow: submitted → reviewed → approved/rejected." });
   }
-  if (/ai|llm|prompt|generate/.test(text)) {
-    terms.push({ term: "Generation", definition: "An AI-produced output triggered by user input. Generations are stored and can be reviewed, edited, or exported." });
+  // ── Universal fallbacks ───────────────────────────────────────────────
+  if (/subscription|plan|billing/.test(text)) {
+    terms.push({ term: "Plan", definition: "The billing tier a user or workspace is on (Free, Pro, Enterprise). Plans control feature access and usage limits." });
+  }
+  if (/ai|llm|prompt|generate|model/.test(text)) {
+    terms.push({ term: "Generation", definition: "An AI-produced output triggered by a user prompt. Generations are stored, attributable to a specific model version, and can be edited or exported." });
+    terms.push({ term: "Prompt", definition: "The natural-language instruction a user submits to the AI. Prompts are the primary input unit and are stored for history and retry." });
+  }
+  if (/member|team|user|role/.test(text)) {
+    terms.push({ term: "Role", definition: "A named set of permissions assigned to a user (Owner, Admin, Member, Viewer). Roles are checked server-side on every authenticated request." });
   }
 
   return terms;

@@ -136,21 +136,48 @@ Rules for determining order:
   // dependency-graph.md (previously it emitted empty arrays on any AI failure).
   const effectiveOrder = ordered ?? heuristicOrder(spec);
   const orderedNames = effectiveOrder.map((o) => o.feature);
+
+  // Group features by heuristic weight to find parallelizable groups
+  const scored = spec.features.map((feature, index) => {
+    const text = feature.toLowerCase();
+    const hit = PRIORITY.find((p) => p.keywords.some((k) => text.includes(k)));
+    return { feature, weight: hit?.weight ?? 4, reason: hit?.reason ?? "Core feature" };
+  });
+
+  const weightGroups = new Map<number, string[]>();
+  scored.forEach(s => {
+    const list = weightGroups.get(s.weight) || [];
+    list.push(s.feature);
+    weightGroups.set(s.weight, list);
+  });
+
+  const parallelizableGroups = Array.from(weightGroups.values()).filter(g => g.length > 1);
+
   const featureDependencies: Record<string, string[]> = {};
   orderedNames.forEach((name, i) => {
-    featureDependencies[name] = i === 0 ? [] : [orderedNames[i - 1]];
+    // Determine the feature's weight
+    const myWeight = scored.find(s => s.feature === name)?.weight ?? 4;
+    // Find all features with a strictly lower weight to use as dependencies
+    const deps = scored.filter(s => s.weight < myWeight).map(s => s.feature);
+    // If no features have a lower weight, but it's not the first feature, default to the immediate predecessor
+    featureDependencies[name] = deps.length > 0 ? deps : (i === 0 ? [] : [orderedNames[i - 1]]);
   });
+
   const fallback = {
-    buildOrder: effectiveOrder.map((o, i) => ({
-      phase: i + 1,
-      name: o.feature,
-      features: [o.feature],
-      reason: o.reason,
-      canParallelize: false,
-    })),
+    buildOrder: effectiveOrder.map((o, i) => {
+      const myWeight = scored.find(s => s.feature === o.feature)?.weight ?? 4;
+      const isParallel = parallelizableGroups.some(g => g.includes(o.feature));
+      return {
+        phase: i + 1,
+        name: o.feature,
+        features: [o.feature],
+        reason: o.reason,
+        canParallelize: isParallel,
+      };
+    }),
     featureDependencies,
     criticalPath: orderedNames,
-    parallelizableGroups: [],
+    parallelizableGroups,
     foundationRequirements: {
       mustBuildFirst: orderedNames.slice(0, 1),
       reason:

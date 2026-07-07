@@ -191,10 +191,40 @@ function getAiRulesForTool(tool: string, category: string, spec: ProjectSpec): s
     'ALWAYS use `prisma.$transaction()` for multi-table writes that must be atomic',
     'NEVER expose raw Prisma types to the API layer — map to domain types in the service',
   ];
+  if (t.includes('drizzle')) return [
+    'ALWAYS use `eq(table.column, value)` for filters — never pass raw strings',
+    'ALWAYS define your schema in a central `src/db/schema.ts` file',
+    'ALWAYS run `drizzle-kit generate` and `drizzle-kit push` before writing queries to ensure types match',
+  ];
   if (t.includes('zustand')) return [
     'ALWAYS define all state mutations (actions) inside the `create()` call — never outside',
     'NEVER store server-fetched data in Zustand unless it needs cross-component sync — use SWR/React Query for server state',
     'ALWAYS use the devtools middleware in development',
+  ];
+  if (t.includes('react query') || t.includes('tanstack query')) return [
+    'ALWAYS use an array for query keys (e.g. `["todos", userId]`) — never strings',
+    'ALWAYS wrap your app in `QueryClientProvider` at the root',
+    'ALWAYS define query fetching functions in the service layer, not inline in the component',
+  ];
+  if (t.includes('trpc')) return [
+    'ALWAYS define routers with input validation using Zod',
+    'ALWAYS use `publicProcedure` for unauthenticated routes and `protectedProcedure` for authenticated ones',
+    'NEVER leak database models directly from tRPC routers — return domain types',
+  ];
+  if (t.includes('convex')) return [
+    'ALWAYS use `query` for reads and `mutation` for writes',
+    'ALWAYS check authentication using `ctx.auth.getUserIdentity()` inside the Convex function',
+    'NEVER import Convex server functions into client components — use the `useQuery` or `useMutation` hooks',
+  ];
+  if (t.includes('resend')) return [
+    'ALWAYS build emails using React components (e.g. `@react-email/components`)',
+    'ALWAYS send emails from a background job or after the primary HTTP response to prevent blocking',
+    'ALWAYS verify the destination email against allowed domains during development',
+  ];
+  if (t.includes('expo')) return [
+    'ALWAYS use Expo Router file-based routing in the `app/` directory',
+    'NEVER use DOM APIs (`window`, `document`) directly — use React Native or Expo equivalents',
+    'ALWAYS use `StyleSheet.create` or Tailwind/Nativewind for styling, never inline styles for performance',
   ];
   if (t.includes('next')) return [
     'ALWAYS default to Server Components — add `"use client"` only when the component uses hooks or browser APIs',
@@ -225,6 +255,30 @@ function getCommonMistakesForTool(tool: string, category: string): string[] {
     'Granting premium access on checkout redirect instead of webhook → users get access before payment confirms.',
     'Not storing `stripe-signature` raw body before parsing → webhook verification always fails.',
     'Using `stripe.prices.list()` in a request handler → expensive API call; cache price IDs in env vars.',
+  ];
+  if (t.includes('drizzle')) return [
+    'Forgetting to await Drizzle queries → returns a Promise instead of data, causing silent failures.',
+    'Using raw SQL strings instead of Drizzle operators → creates SQL injection vulnerabilities.',
+  ];
+  if (t.includes('trpc')) return [
+    'Calling tRPC procedures as normal functions → use the tRPC client or hooks instead.',
+    'Returning raw database objects without Zod validation → leaks sensitive data like password hashes.',
+  ];
+  if (t.includes('convex')) return [
+    'Calling a Convex mutation from a Server Component without a client context → fails at runtime.',
+    'Forgetting to add indexes in `schema.ts` for frequently queried fields → causes full table scans.',
+  ];
+  if (t.includes('resend')) return [
+    'Blocking an API route waiting for Resend to reply → increases latency and risks timeout; send async.',
+    'Sending test emails to unverified addresses in the free tier → Resend silently drops them.',
+  ];
+  if (t.includes('react query') || t.includes('tanstack query')) return [
+    'Using non-unique query keys → causes cache collisions between completely different data sources.',
+    'Mutating data without calling `invalidateQueries` → UI remains stale until the user reloads the page.',
+  ];
+  if (t.includes('expo')) return [
+    'Importing React DOM dependencies (like `react-router-dom`) → crashes the native bundler.',
+    'Using `100vh` in stylesheets → behaves unpredictably on mobile; use flexbox or `Dimensions.get("window")`.',
   ];
   if (t.includes('next')) return [
     'Adding `"use client"` to a layout or page that only needs to pass data → kills server rendering for entire subtree.',

@@ -217,10 +217,55 @@ function designSystemFiles(spec: ProjectSpec): PackageFiles {
     ? `Derived from the developer's design references: ${refs.join(", ")}.`
     : `**PLATFORM DEFAULTS** — no design references were provided. These are sensible ${spec.platform} defaults. Replace with your brand values once a visual direction exists.`;
 
+  // Domain-aware color palette
+  const text = `${spec.description} ${spec.features.join(" ")}`.toLowerCase();
+  let primary = "#6366F1"; let primaryHover = "#4F46E5"; let primarySubtle = "#EEF2FF";
+  let accent = "#06B6D4";  let accentHover = "#0891B2";
+  let paletteName = "Indigo / Cyan (neutral SaaS)";
+
+  if (/game|gaming|entertain|esport|arcade|play|quest|rpg|adventure/.test(text)) {
+    primary = "#8B5CF6"; primaryHover = "#7C3AED"; primarySubtle = "#EDE9FE";
+    accent = "#F97316";  accentHover = "#EA580C";
+    paletteName = "Purple / Orange (gaming & entertainment)";
+  } else if (/medical|health|clinic|doctor|patient|hospital|therapy|wellness|mental/.test(text)) {
+    primary = "#0EA5E9"; primaryHover = "#0284C7"; primarySubtle = "#E0F2FE";
+    accent = "#10B981";  accentHover = "#059669";
+    paletteName = "Sky Blue / Emerald (medical & health)";
+  } else if (/finance|bank|invest|trading|crypto|stock|portfolio|wealth|fintech|money/.test(text)) {
+    primary = "#1E3A5F"; primaryHover = "#152A47"; primarySubtle = "#EFF6FF";
+    accent = "#CA8A04";  accentHover = "#A16207";
+    paletteName = "Navy / Gold (finance & fintech)";
+  } else if (/learn|educat|school|course|lesson|tutor|student|academ|training/.test(text)) {
+    primary = "#0D9488"; primaryHover = "#0F766E"; primarySubtle = "#F0FDFA";
+    accent = "#D97706";  accentHover = "#B45309";
+    paletteName = "Teal / Amber (education & e-learning)";
+  } else if (/fitness|workout|gym|sport|run|athlet|training|exercise/.test(text)) {
+    primary = "#EA580C"; primaryHover = "#C2410C"; primarySubtle = "#FFF7ED";
+    accent = "#DC2626";  accentHover = "#B91C1C";
+    paletteName = "Orange / Red (fitness & sports)";
+  } else if (/food|restaurant|recipe|cook|meal|diet|nutrition|eat|deliver/.test(text)) {
+    primary = "#16A34A"; primaryHover = "#15803D"; primarySubtle = "#F0FDF4";
+    accent = "#C2410C";  accentHover = "#9A3412";
+    paletteName = "Green / Terracotta (food & restaurant)";
+  } else if (/social|communit|network|post|feed|follow|friend|connect/.test(text)) {
+    primary = "#E11D48"; primaryHover = "#BE123C"; primarySubtle = "#FFF1F2";
+    accent = "#7C3AED";  accentHover = "#6D28D9";
+    paletteName = "Rose / Violet (social & community)";
+  } else if (/real.?estate|property|rent|mortgage|home|house|apartment/.test(text)) {
+    primary = "#1D4ED8"; primaryHover = "#1E40AF"; primarySubtle = "#EFF6FF";
+    accent = "#059669";  accentHover = "#047857";
+    paletteName = "Blue / Emerald (real estate)";
+  } else if (/travel|trip|booking|hotel|flight|destination|tour/.test(text)) {
+    primary = "#0369A1"; primaryHover = "#075985"; primarySubtle = "#F0F9FF";
+    accent = "#D97706";  accentHover = "#B45309";
+    paletteName = "Ocean Blue / Amber (travel)";
+  }
+
   return {
     "prompt_material/design-system/colors.md": `# Color System — ${spec.projectName}
 
 > ${basis}
+> **Domain palette:** ${paletteName}
 
 ## Token Structure
 
@@ -229,15 +274,15 @@ Define all colors as tokens. **Never use raw hex/rgb values in components** — 
 ### Primary Palette
 | Token | Purpose | Example Value |
 |---|---|---|
-| \`--color-primary\` | Brand color, primary CTAs, active states | \`#6366F1\` (indigo) |
-| \`--color-primary-hover\` | Primary hover/press state | \`#4F46E5\` |
-| \`--color-primary-subtle\` | Backgrounds, badges, light accents | \`#EEF2FF\` |
+| \`--color-primary\` | Brand color, primary CTAs, active states | \`${primary}\` |
+| \`--color-primary-hover\` | Primary hover/press state | \`${primaryHover}\` |
+| \`--color-primary-subtle\` | Backgrounds, badges, light accents | \`${primarySubtle}\` |
 
 ### Accent
 | Token | Purpose | Example Value |
 |---|---|---|
-| \`--color-accent\` | Secondary actions, highlights, links | \`#06B6D4\` (cyan) |
-| \`--color-accent-hover\` | Accent hover state | \`#0891B2\` |
+| \`--color-accent\` | Secondary actions, highlights, links | \`${accent}\` |
+| \`--color-accent-hover\` | Accent hover state | \`${accentHover}\` |
 
 ### Neutrals (Light/Dark Mode)
 | Token | Light | Dark |
@@ -271,8 +316,8 @@ Map these tokens in \`tailwind.config.js\`:
 theme: {
   extend: {
     colors: {
-      primary: { DEFAULT: '#6366F1', hover: '#4F46E5', subtle: '#EEF2FF' },
-      accent: { DEFAULT: '#06B6D4', hover: '#0891B2' },
+      primary: { DEFAULT: '${primary}', hover: '${primaryHover}', subtle: '${primarySubtle}' },
+      accent: { DEFAULT: '${accent}', hover: '${accentHover}' },
       success: '#10B981',
       warning: '#F59E0B',
       error: '#EF4444',
@@ -282,6 +327,7 @@ theme: {
 \`\`\`
 ` : ""}
 `,
+
 
     "prompt_material/design-system/typography.md": `# Typography System — ${spec.projectName}
 
