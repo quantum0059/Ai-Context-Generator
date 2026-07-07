@@ -77,10 +77,12 @@ export function generateSkills(spec: ProjectSpec, _sharedContext: string = ''): 
       installCommands: installCmds,
       envVars: reg?.envVars ?? [],
       bestPractices: [
+        // Registry-specific pros lead — they're the most useful, tool-specific guidance
+        ...(reg ? reg.pros.map((p) => `${p}`) : []),
+        // Universal service-layer rules follow as a reminder
         `Wrap all ${tool} calls in a dedicated service module — components and routes never import ${tool} directly.`,
         `Initialize ${tool} once at application startup; fail fast if configuration is missing.`,
         `Map ${tool} responses to ${spec.projectName} domain types at the service boundary.`,
-        ...(reg ? reg.pros.map((p) => `Leverage: ${p}`) : []),
       ],
       pitfalls: [
         ...(reg ? reg.cons : [`Assuming API conventions without checking current ${tool} docs.`]),
@@ -116,9 +118,12 @@ export function generateSkills(spec: ProjectSpec, _sharedContext: string = ''): 
       ? reg.skillGenerationHints
       : `No registry data available for ${tool}; consult its official documentation.`;
 
-    // Extract the specific snippet for this tool if it exists
-    const snippetMatch = allSnippets.match(new RegExp(`### ${tool} \\(${category}\\)[\\s\\S]*?(\`\`\`[a-z]*[\\s\\S]*?\`\`\`)`));
+    // Extract the specific snippet for this tool — escape tool name for regex
+    const escapedTool = tool.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedCategory = category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const snippetMatch = allSnippets.match(new RegExp(`### ${escapedTool} \\(${escapedCategory}\\)[\\s\\S]*?(\`\`\`[a-z]*[\\s\\S]*?\`\`\`)`));
     const snippetSection = snippetMatch ? `\n**Code Integration Pattern:**\n${snippetMatch[1]}\n` : "";
+
 
     markdownSections.push(
       `${warn}### ${tool} (${category})

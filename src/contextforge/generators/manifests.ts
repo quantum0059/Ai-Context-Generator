@@ -153,11 +153,13 @@ export async function generateManifests(
     // Human-readable feature guide
     // context.md and agents.md are always rendered as explicit steps 1 and 2;
     // the rest of the context list (decisions, prompts, UI refs) follows.
+    // Use a running counter so steps never all appear as "4."
+    let stepCounter = 4;
     const supplementaryContext = uniqueContext
       .filter((p) => p !== "context.md" && p !== "agents.md" && p !== "tech-stack.md")
       .map((path) => {
         const description = describeFile(path, spec, relevant);
-        return `4. **\`${path}\`** — ${description}`;
+        return `${stepCounter++}. **\`${path}\`** — ${description}`;
       })
       .join("\n");
 
@@ -225,15 +227,22 @@ function describeFile(
     );
     if (match) {
       const entry = spec.stack[match];
-      return `ADR explaining why ${entry?.value} was chosen for ${match}`;
+      return `ADR explaining why ${entry?.value} was chosen for ${match} — read before touching ${match} code`;
     }
     return "Architecture Decision Record for a locked technology choice";
   }
   if (path.startsWith("prompt_material/ui-references/")) {
-    return "UI reference for this feature's screens";
+    return "UI reference for this feature's screens — include when building any visual component";
   }
   if (path.startsWith("prompts/")) {
-    return "Build prompt — copy-paste into your AI assistant";
+    // Parse the aspect from the filename: prompts/<feature>/<aspect>.md
+    const parts = path.split("/");
+    const aspectFile = parts[parts.length - 1]?.replace(".md", "") ?? "";
+    const aspectLabel = aspectFile
+      .split("-")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+    return `Build prompt: ${aspectLabel} — copy-paste into your AI assistant to implement this aspect`;
   }
   return "Supporting context file";
 }
@@ -255,9 +264,26 @@ function buildFallbackManifest(
 
   // Derive files to create from feature slug and stack
   const isNextjs = locked.some(([, e]) => e.value.toLowerCase().includes('next'));
-  const filesToCreate: string[] = isNextjs
+  const isMobileSpec = /mobile|ios|android|expo|react.?native/.test(spec.platform.toLowerCase());
+  const isCliSpec = /cli|headless|backend.?only|engine/.test(spec.platform.toLowerCase())
+    || locked.some(([c]) => /runtime|cli/.test(c.toLowerCase()));
+
+  const filesToCreate: string[] = isMobileSpec
+    ? [`app/${slug}.tsx`, `src/components/${slug}/index.tsx`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
+    : isCliSpec
+    ? [`src/commands/${slug}.ts`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
+    : isNextjs
     ? [`src/app/${slug}/page.tsx`, `src/components/${slug}/index.tsx`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
     : [`src/features/${slug}/index.ts`, `src/services/${slug}.ts`, `src/types/${slug}.ts`];
+
+  // Derive files_to_modify from platform — never hardcode Next.js paths for all platforms
+  const filesToModify: string[] = isMobileSpec
+    ? [`app/_layout.tsx`, `src/components/navigation/TabNavigator.tsx`]
+    : isCliSpec
+    ? [`src/index.ts`]
+    : isNextjs
+    ? [`src/app/layout.tsx`, `src/components/navigation/Navigation.tsx`]
+    : [`src/main.tsx`, `src/router.tsx`];
 
   // Derive acceptance criteria from feature name + stack
   const acceptanceCriteria: string[] = [
@@ -314,10 +340,7 @@ function buildFallbackManifest(
     version: spec.projectSpecVersion,
     load_before_starting: requiredContext,
     files_to_create: filesToCreate,
-    files_to_modify: [
-      'src/app/layout.tsx',
-      'src/components/navigation/Navigation.tsx',
-    ],
+    files_to_modify: filesToModify,
     acceptance_criteria: acceptanceCriteria,
     environment_variables_required: Array.from(new Set(envVars)),
     test_commands: testCommands,

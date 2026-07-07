@@ -107,9 +107,16 @@ function fallbackDecision(spec: ProjectSpec, category: string, entry: StackEntry
     (e) => e.name.toLowerCase() !== chosen.toLowerCase(),
   );
 
-  // Derive a code snippet for this specific tool
+  // Extract ONLY the snippet for this specific tool — not all snippets
   const allSnippets = buildTechCodeSnippets(spec);
-  const toolKey = chosen.toLowerCase();
+  const escapedTool = chosen.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedCategory = category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const snippetMatch = allSnippets.match(
+    new RegExp(`### ${escapedTool} \\(${escapedCategory}\\)[\\s\\S]*?(\`\`\`[a-z]*[\\s\\S]*?\`\`\`)`)
+  );
+  const toolSnippet = snippetMatch
+    ? snippetMatch[1]
+    : `\`\`\`typescript\n// Install: ${reg?.installCommands.join(' && ') ?? `npm install ${chosen.toLowerCase()}`}\n// Initialize ${chosen} and import it only in src/services/ or src/lib/\n// See official docs: ${reg?.docsUrl ?? 'https://www.npmjs.com/package/' + chosen.toLowerCase()}\n\`\`\``;
 
   // AI-specific rules per tool
   const aiRules = getAiRulesForTool(chosen, category, spec);
@@ -137,9 +144,7 @@ ${reg ? `${reg.skillGenerationHints} Pros: ${reg.pros.join("; ")}.` : `The devel
 
 The following shows the correct way to initialize and use **${chosen}** in ${spec.projectName}:
 
-${allSnippets.includes(toolKey) || allSnippets.length > 0
-  ? allSnippets
-  : `\`\`\`typescript\n// Install: ${reg?.installCommands.join(' && ') ?? `npm install ${chosen.toLowerCase()}`}\n// Initialize ${chosen} and import it only in src/services/ or src/lib/\n// See official docs: ${reg?.docsUrl ?? 'https://www.npmjs.com/package/' + chosen.toLowerCase()}\n\`\`\``}
+${toolSnippet}
 
 ## What This Means For The AI
 
@@ -159,6 +164,7 @@ ${commonMistakes.map((m, i) => `${i + 1}. ${m}`).join('\n')}
 AI assistants and developers MUST NOT replace **${chosen}** without superseding this ADR with a new, approved record.
 `;
 }
+
 
 function getAiRulesForTool(tool: string, category: string, spec: ProjectSpec): string[] {
   const t = tool.toLowerCase();

@@ -153,9 +153,18 @@ async function addMissingInstallCommands(spec: ProjectSpec, files: PackageFiles)
   const generated = await Promise.all(
     unknown.map((toolName) => getInstallCommands(toolName, spec.platform, isOffline)),
   );
-  const commandBlock = Array.from(new Set(generated)).join("\n");
+
   const shell = files["setup/install.sh"] ?? `#!/usr/bin/env bash\nset -euo pipefail\n`;
   const powershell = files["setup/install.ps1"] ?? "";
+
+  // Deduplicate generated commands against lines already present in the script
+  const existingLines = new Set([...shell.split("\n"), ...powershell.split("\n")]);
+  const newLines = Array.from(new Set(generated.flatMap((block) => block.split("\n"))))
+    .filter((line) => line.trim().length > 0 && !existingLines.has(line));
+
+  if (newLines.length === 0) return files;
+  const commandBlock = newLines.join("\n");
+
   const shellWithCommands = shell.includes('echo "Done."')
     ? shell.replace('echo "Done."', `${commandBlock}\necho "Done."`)
     : `${shell.trimEnd()}\n${commandBlock}\n`;
@@ -169,6 +178,7 @@ async function addMissingInstallCommands(spec: ProjectSpec, files: PackageFiles)
   };
 }
 
+
 async function fallbackSetup(spec: ProjectSpec): Promise<PackageFiles> {
   const known: string[] = [];
   const unknown: string[] = [];
@@ -177,6 +187,7 @@ async function fallbackSetup(spec: ProjectSpec): Promise<PackageFiles> {
     if (reg) known.push(...reg.installCommands);
     else unknown.push(entry.value);
   }
+  // Deduplicate install commands — prevents the "-D installed 2 times" validator warning
   const commands = Array.from(new Set(known));
   const isOffline = Boolean(spec.constraints.technical?.mustBeOffline)
     || /\b(offline|no internet|without internet)\b/i.test(spec.description);
@@ -184,24 +195,135 @@ async function fallbackSetup(spec: ProjectSpec): Promise<PackageFiles> {
     unknown.map((toolName) => getInstallCommands(toolName, spec.platform, isOffline)),
   );
 
+  // Determine dev server start command from framework
+  const locked = lockedEntries(spec);
+  const hasExpo = locked.some(([, e]) => e.value.toLowerCase().includes('expo'));
+  const hasNext = locked.some(([, e]) => e.value.toLowerCase().includes('next'));
+  const startCmd = hasExpo ? 'npx expo start' : hasNext ? 'npm run dev' : 'npm run dev';
+
+  // Build .env.example from registry env vars
+  const envLines: string[] = [];
+  const envByTool: Map<string, string[]> = new Map();
+  for (const [, entry] of locked) {
+    const reg = registryByName(entry.value);
+    if (reg?.envVars && reg.envVars.length > 0) {
+      envByTool.set(entry.value, reg.envVars);
+    }
+  }
+  if (envByTool.size > 0) {
+    Array.from(envByTool.entries()).forEach(([tool, vars]) => {
+      envLines.push(`# ── ${tool} ──────────────────────────────────────────`);
+      vars.forEach((v: string) => {
+        // Produce a realistic example value based on the variable name
+        let example = 'your_value_here';
+        if (v.includes('URL')) example = 'https://your-project.supabase.co';
+        if (v.includes('KEY') && v.includes('PUBLIC')) example = 'pk_live_replace_with_your_key';
+
+        if (v.includes('KEY') && !v.includes('PUBLIC')) example = 'sk_live_replace_with_your_key';
+
+        if (v.includes('SECRET')) example = 'whsec_xxxxxxxxxxxxxxxxxxxxxxxx';
+        if (v.includes('PUBLISHABLE')) example = 'pk_live_xxxxxxxxxxxxxxxxxxxxxxxx';
+        if (v.includes('ANON')) example = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
+        if (v.includes('APP_URL') || v.includes('SITE_URL')) example = 'http://localhost:3000';
+        envLines.push(`${v}=${example}`);
+      });
+      envLines.push('');
+    });
+  } else {
+    envLines.push('# No environment variables detected from the locked stack.');
+    envLines.push('# Add any required vars here, e.g.:');
+    envLines.push('# DATABASE_URL=postgresql://localhost:5432/mydb');
+  }
+
   return {
     "setup/install.sh": `#!/usr/bin/env bash
 set -euo pipefail
+
+# ── Prerequisites ─────────────────────────────────────────────────────────────
+echo "Checking prerequisites for ${spec.projectName}..."
+if ! command -v node &>/dev/null; then
+  echo "❌ Node.js is not installed. Install it from https://nodejs.org (LTS recommended)" && exit 1
+fi
+NODE_VER=$(node -e "process.stdout.write(process.versions.node.split('.')[0])")
+if [ "$NODE_VER" -lt 18 ]; then
+  echo "❌ Node.js 18+ required. Current: $(node -v)" && exit 1
+fi
+echo "✅ Node.js $(node -v)"
+
+# ── Install dependencies ───────────────────────────────────────────────────────
 echo "Installing the locked stack for ${spec.projectName}..."
 ${[...commands, ...unknownLines].join("\n") || "echo 'No install commands - stack has no locked entries.'"}
-echo "Done."
+
+# ── Environment variables ─────────────────────────────────────────────────────
+if [ ! -f .env.local ]; then
+  cp setup/.env.example .env.local
+  echo "✅ Created .env.local from setup/.env.example — fill in your API keys"
+else
+  echo "ℹ️  .env.local already exists — skipping copy"
+fi
+
+echo ""
+echo "✅ Setup complete! Start the dev server with: ${startCmd}"
 `,
     "setup/install.ps1": `Write-Host "Installing the locked stack for ${spec.projectName}..."
 ${[...commands, ...unknownLines].join("\n") || "Write-Host 'No install commands - stack has no locked entries.'"}
-Write-Host "Done."
+
+if (-not (Test-Path .env.local)) {
+  Copy-Item setup/.env.example .env.local
+  Write-Host "Created .env.local from setup/.env.example - fill in your API keys"
+} else {
+  Write-Host ".env.local already exists - skipping copy"
+}
+
+Write-Host "Done. Start the dev server with: ${startCmd}"
 `,
+    "setup/.env.example": `# Environment Variables — ${spec.projectName}
+# Copy this file to .env.local and fill in the values.
+# NEVER commit .env.local to version control.
+
+${envLines.join("\n")}`,
     "setup/setup-guide.md": `# Setup Guide: ${spec.projectName}
 
-1. Run \`setup/install.sh\` (macOS/Linux) or \`setup/install.ps1\` (Windows).
-2. Configure environment variables - see \`tech-stack.md\` for required env vars per technology.
-3. Copy \`agents.md\` to your repository root so every AI assistant reads it.
-4. Start with the first phase in \`roadmap.md\`, loading context from \`context-manifests/\`.
+## Prerequisites
+
+- **Node.js** 18 or higher — [nodejs.org](https://nodejs.org)
+- **npm** 9+ (comes with Node.js)
+${hasExpo ? '- **Expo CLI** — `npm install -g expo-cli`\n- **Expo Go** app on your phone (iOS or Android)' : ''}
+
+## 1. Install Dependencies
+
+\`\`\`bash
+bash setup/install.sh   # macOS / Linux
+\`\`\`
+\`\`\`powershell
+./setup/install.ps1     # Windows PowerShell
+\`\`\`
+
+## 2. Configure Environment Variables
+
+\`setup/install.sh\` copies \`setup/.env.example\` to \`.env.local\` automatically.
+Open \`.env.local\` and fill in the values:
+
+${Array.from(envByTool.entries()).map(([tool, vars]: [string, string[]]) =>
+  `### ${tool}\n${vars.map((v: string) => `- \`${v}\` — get from the ${tool} dashboard`).join('\n')}`
+).join('\n\n') || '- See `setup/.env.example` for the full list of required variables.'}
+
+## 3. Start the Development Server
+
+\`\`\`bash
+${startCmd}
+\`\`\`
+
+## Common Setup Problems
+
+| Problem | Solution |
+|---|---|
+| \`Module not found\` | Run \`npm install\` again; delete \`node_modules\` and retry |
+| \`NEXT_PUBLIC_* is undefined\` | Restart the dev server after editing \`.env.local\` |
+| \`Invalid API key\` | Double-check the key in \`.env.local\` — no quotes needed |
+| Port 3000 in use | Run with \`PORT=3001 ${startCmd}\` |
 ${unknown.length ? `\n> Note: no verified install commands for: ${unknown.join(", ")}. Verify against official docs.` : ""}
 `,
   };
 }
+

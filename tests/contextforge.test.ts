@@ -334,4 +334,118 @@ describe("Prompt quality regressions", () => {
   });
 });
 
+// ─── Output File Quality Regression Tests ─────────────────────────────────────
+// One test per new bug fixed. If any is ever reintroduced, the suite catches it.
 
+import { generateSkills } from "../src/contextforge/generators/skills";
+import { generateAgents } from "../src/contextforge/generators/agents";
+
+describe("Output file quality regressions (session 2)", () => {
+  // Shared mobile spec
+  const mobileDraft: DraftInput = {
+    projectName: "LingoQuest",
+    description: "A Duolingo-inspired mobile language app with XP and streaks.",
+    platform: "mobile-ios-android",
+    features: ["Authentication", "Gamification Features"],
+    constraints: {},
+  };
+  const mobileStack = {
+    frontendFramework: { value: "Expo (React Native)", source: "user" as const },
+    authentication: { value: "Clerk", source: "suggested" as const, confidence: "high" as const },
+    database: { value: "Supabase", source: "suggested" as const, confidence: "high" as const },
+  };
+  const mobileSpec = finalizeProjectSpec(mobileDraft, Object.keys(mobileStack), mobileStack);
+
+  // Shared web spec with a "Google Gemini" tool to test multi-word regex
+  const geminiStack = {
+    frontendFramework: { value: "Next.js", source: "user" as const },
+    aiProvider: { value: "Google Gemini", source: "user" as const, confidence: "high" as const },
+  };
+  const geminiSpec = finalizeProjectSpec(
+    { projectName: "AI Demo", description: "An AI app.", platform: "web", features: ["AI Chat"], constraints: {} },
+    Object.keys(geminiStack),
+    geminiStack,
+  );
+
+  // ── Bug 1: agents.md fallback uses platform-aware folder conventions ────────
+  it("Bug 1: agents.md fallback shows Expo Router paths for mobile, not Next.js paths", async () => {
+    const content = await generateAgents(mobileSpec);
+    // Mobile should reference app/ not src/app/
+    expect(content).toMatch(/app\/.*\.tsx/);
+    // Should NOT emit the Next.js-specific App Router path as a primary convention
+    expect(content).not.toMatch(/src\/app\/\<route\>\/page\.tsx/);
+    // Should call out React Native primitive restrictions
+    expect(content).toMatch(/React Native|Expo Router|<View>/i);
+  });
+
+  it("Bug 1: agents.md fallback contains an Error Handling Contract section", async () => {
+    const content = await generateAgents(mobileSpec);
+    expect(content).toContain("Error Handling Contract");
+    expect(content).toContain("ApiErrorResponse");
+  });
+
+  // ── Bug 2: tech-stack.md shows snippet for Google Gemini (multi-word tool) ─
+  it("Bug 2: tech-stack.md shows a code snippet for 'Google Gemini' (multi-word tool name)", () => {
+    const { "tech-stack.md": md } = generateSkills(geminiSpec);
+    // If the regex escaped correctly, the snippet section will have actual code
+    expect(md).toContain("Google Gemini");
+    // The snippet block should be present — not just the info table
+    expect(md).toContain("Code Integration Pattern");
+  });
+
+  // ── Bug 3: decisions ADR for Clerk does NOT contain Supabase code ──────────
+  it("Bug 3: Clerk ADR does not contain Supabase code or Stripe code", async () => {
+    const { generateDecisions } = await import("../src/contextforge/generators/decisions");
+    const files = await generateDecisions(mobileSpec);
+    const clerkAdr = Object.entries(files).find(([path]) =>
+      path.toLowerCase().includes("authentication") || path.toLowerCase().includes("auth")
+    )?.[1] ?? "";
+    expect(clerkAdr.length).toBeGreaterThan(0);
+    // Clerk ADR should reference Clerk
+    expect(clerkAdr.toLowerCase()).toContain("clerk");
+    // But should NOT contain Supabase or Stripe code snippets
+    expect(clerkAdr).not.toContain("createBrowserClient");
+    expect(clerkAdr).not.toContain("stripe.webhooks.constructEvent");
+  });
+
+  // ── Bug 4: setup fallback always generates .env.example ───────────────────
+  it("Bug 4: setup fallback always produces setup/.env.example", async () => {
+    const { generateSetup } = await import("../src/contextforge/generators/docs-setup");
+    const files = await generateSetup(mobileSpec);
+    expect(files["setup/.env.example"]).toBeDefined();
+    expect(files["setup/.env.example"].length).toBeGreaterThan(10);
+    // Should contain a header
+    expect(files["setup/.env.example"]).toContain("Environment Variables");
+    // install.sh should copy .env.example to .env.local
+    expect(files["setup/install.sh"]).toContain(".env.example");
+  });
+
+  // ── Bug 5: manifests use platform-aware files_to_modify ───────────────────
+  it("Bug 5: context-manifest for mobile does not hardcode Next.js layout.tsx path", async () => {
+    const { generateManifests } = await import("../src/contextforge/generators/manifests");
+    const files = await generateManifests(mobileSpec, {});
+    const manifest = JSON.parse(files["context-manifests/authentication.json"] ?? "{}");
+    const filesToModify: string[] = manifest.files_to_modify ?? [];
+    // Should NOT include Next.js App Router layout for a mobile project
+    expect(filesToModify).not.toContain("src/app/layout.tsx");
+    // Should include Expo-appropriate layout
+    expect(filesToModify.some((f: string) => f.includes("_layout") || f.includes("TabNavigator"))).toBe(true);
+  });
+
+  // ── Bug 6: feature guide steps are numbered sequentially, not all as "4." ─
+  it("Bug 6: feature guide supplementary steps are numbered sequentially (not all 4.)", async () => {
+    const { generateManifests } = await import("../src/contextforge/generators/manifests");
+    // Create spec with prompts so the guide has supplementary items
+    const promptFiles = {
+      "prompts/gamification-features/ui-components.md": "# Build: UI",
+      "prompts/gamification-features/api-routes.md": "# Build: API",
+    };
+    const files = await generateManifests(mobileSpec, promptFiles);
+    const guide = files["context-manifests/gamification-features-guide.md"] ?? "";
+    expect(guide).toBeDefined();
+    // Should not have two consecutive "4. " steps
+    expect(guide).not.toMatch(/4\. .+\n4\. /);
+    // Should have step 5 somewhere after step 4
+    expect(guide).toMatch(/5\. /);
+  });
+});

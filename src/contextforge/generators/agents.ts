@@ -210,6 +210,46 @@ function fallbackAgents(spec: ProjectSpec): string {
 
   const constraintBlock = buildConstraintBlock(spec);
 
+  // Platform-aware folder conventions
+  const platformLow = spec.platform.toLowerCase();
+  const isMobile = /mobile|ios|android|expo|react.?native/.test(platformLow);
+  const isCliOrHeadless = /cli|headless|backend.?only|engine/.test(platformLow)
+    || locked.some(([c]) => /runtime|cli/.test(c.toLowerCase()));
+  const isNextjs = locked.some(([, e]) => e.value.toLowerCase().includes('next'));
+
+  let fileConventions: string;
+  if (isMobile) {
+    fileConventions = `- **Screens:** \`app/<screen>.tsx\` — Expo Router file-based routing, one screen per file
+- **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, React Native primitives only
+- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
+- **Stores:** \`src/stores/<domain>Store.ts\` — one store per domain
+- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
+- **Tests:** \`src/__tests__/<module>.test.ts\` or co-located \`__tests__/\`
+- ❌ NO \`<div>\`/\`<span>\`/HTML elements — use React Native \`<View>\`/\`<Text>\` primitives
+- ❌ NO Next.js imports (\`next/navigation\`, \`next/server\`) — use Expo Router`;
+  } else if (isCliOrHeadless) {
+    fileConventions = `- **Commands:** \`src/commands/<command>.ts\` — one file per CLI command, kebab-case
+- **Core logic:** \`src/core/<module>.ts\` — pure business logic, no I/O
+- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
+- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
+- **Tests:** \`tests/<module>.test.ts\` — test every public function
+- ❌ NO React, DOM, or browser APIs — this is a Node.js / CLI project`;
+  } else if (isNextjs) {
+    fileConventions = `- **Pages:** \`src/app/<route>/page.tsx\` — Next.js App Router, Server Component by default
+- **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, one component per file
+- **API Routes:** \`src/app/api/<resource>/route.ts\` — one handler file per resource
+- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
+- **Stores:** \`src/stores/<domain>Store.ts\` — one store per domain (client state only)
+- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
+- **Tests:** \`src/__tests__/<module>.test.ts\` or co-located \`__tests__/\``;
+  } else {
+    fileConventions = `- **Pages:** \`src/pages/<route>.tsx\`
+- **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, one component per file
+- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
+- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
+- **Tests:** \`src/__tests__/<module>.test.ts\``;
+  }
+
   return `# ${spec.projectName} — AI Development Constitution
 ${constraintBlock}
 
@@ -244,13 +284,31 @@ ${schema}
 
 ## File & Folder Conventions
 
-- **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, one component per file
-- **Pages:** \`src/app/<route>/page.tsx\` (Next.js) or \`src/pages/<route>.tsx\`
-- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
-- **Stores:** \`src/stores/<domain>Store.ts\` — one store per domain
-- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
-- **API Routes:** \`src/app/api/<resource>/route.ts\`
-- **Tests:** \`src/__tests__/<module>.test.ts\` or co-located \`__tests__/\`
+${fileConventions}
+
+## Error Handling Contract
+
+Every API response from this project uses this exact shape. Never invent a different error format.
+
+\`\`\`typescript
+// src/types/errors.ts
+export interface ApiErrorResponse {
+  error: string;          // human-readable message
+  code?: string;          // machine-readable code e.g. 'UNAUTHORIZED', 'VALIDATION_FAILED'
+  details?: unknown;      // ZodError.flatten() for validation errors, undefined otherwise
+}
+
+// Usage in a route handler:
+if (!userId) {
+  return Response.json(
+    { error: 'Unauthorized', code: 'UNAUTHORIZED' } satisfies ApiErrorResponse,
+    { status: 401 }
+  );
+}
+\`\`\`
+
+Happy-path responses return the resource directly (not wrapped in \`{ data: ... }\`).
+
 
 ## What NOT to do
 - Do NOT introduce technologies outside the LOCKED stack above.
