@@ -26,3 +26,4 @@ review.md
 /test-discovery.js
 /test-huge.js
 /test-constraints.ts
+/test-eval.ts
