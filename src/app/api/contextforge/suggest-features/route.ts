@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isClaudeConfigured } from "@/lib/claude";
 import type { Feature, FeatureSet } from "@/types/projectspec";
 import { normalizeAndGroupFeatures } from "@/contextforge/feature-pipeline";
+import { withCompression } from "@/lib/compression";
 
 // ─── Request schema ───────────────────────────────────────────────────────────
 
@@ -372,11 +373,11 @@ export async function POST(req: Request) {
   // ── Heuristic path (no AI configured) ──────────────────────────────────────
   if (!isClaudeConfigured() || functionalRequirements.length === 0) {
     const set = heuristicFeatureSet(description, platform, projectType, existingFeatureNames);
-    return Response.json({
+    return withCompression({
       ...set,
       features: flattenFeatureNames(set), // backwards-compat flat list
       engine: "heuristic",
-    });
+    }, req);
   }
 
   // ── AI path ─────────────────────────────────────────────────────────────────
@@ -398,20 +399,20 @@ export async function POST(req: Request) {
       })).filter((epic) => epic.features.length > 0),
     };
 
-    return Response.json({
+    return withCompression({
       ...deduped,
       features: flattenFeatureNames(deduped), // backwards-compat flat list
       engine: "ai",
-    });
+    }, req);
   } catch (err) {
     console.error("[SuggestFeatures Error]", err);
     // Graceful structured fallback
     const set = heuristicFeatureSet(description, platform, projectType, existingFeatureNames);
-    return Response.json({
+    return withCompression({
       ...set,
       features: flattenFeatureNames(set),
       engine: "heuristic",
       error: err instanceof Error ? err.message : "AI call failed",
-    });
+    }, req);
   }
 }

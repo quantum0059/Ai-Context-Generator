@@ -314,7 +314,7 @@ function buildSuggestionPresentation(
     };
   }
 
-  const bundle = detectFeatureBundle(draft.features, draft.projectType);
+  const bundle = detectFeatureBundle(draft.features, draft.projectType, draft.description);
   const affinityRule = findAppliedAffinityRule(category, top, draft);
   const summaryParts = [
     `${top.name} is the recommended default for ${humanizeCategory(category)}.`,
@@ -411,7 +411,7 @@ function buildContextBlock(category: string, draft: DraftInput): string {
   // Feature bundle detection — identify when features naturally map to
   // all-in-one platforms so the LLM can prefer coherent bundles over
   // picking best-in-class for each category independently.
-  const featureBundle = detectFeatureBundle(draft.features, draft.projectType);
+  const featureBundle = detectFeatureBundle(draft.features, draft.projectType, draft.description);
   if (featureBundle) {
     lines.push(`🎯 FEATURE BUNDLE DETECTED: ${featureBundle.name}`);
     lines.push(`   Recommended coherent platform: ${featureBundle.recommendedPlatform}`);
@@ -485,10 +485,6 @@ function buildContextBlock(category: string, draft: DraftInput): string {
   return lines.join("\n");
 }
 
-/**
- * Detects when a set of features maps to a known all-in-one platform
- * that covers multiple categories coherently.
- */
 interface FeatureBundle {
   name: string;
   recommendedPlatform: string;
@@ -496,9 +492,23 @@ interface FeatureBundle {
   categories: string[];
 }
 
-function detectFeatureBundle(features: string[], projectType?: string): FeatureBundle | null {
+/**
+ * Detects when a set of features maps to a known all-in-one platform
+ * that covers multiple categories coherently.
+ *
+ * @param features  - The list of user-selected features.
+ * @param projectType - The classified project type (e.g. "UI_APPLICATION").
+ * @param description - The raw project description, used to detect explicit
+ *   backend technology choices that should NOT be overridden by a bundle.
+ */
+function detectFeatureBundle(
+  features: string[],
+  projectType?: string,
+  description?: string,
+): FeatureBundle | null {
   const featureText = features.join(" ").toLowerCase();
   const type = projectType?.toLowerCase() ?? "";
+  const descText = (description ?? "").toLowerCase();
 
   // Skip for non-UI projects
   if (type === "cli_tool" || type === "library_or_sdk" || type === "headless_engine") {
@@ -516,8 +526,19 @@ function detectFeatureBundle(features: string[], projectType?: string): FeatureB
   const hasAnalytics = /\b(analytics|metrics|dashboard|report|track)\b/.test(featureText);
   const hasMonitoring = /\b(monitor|error|crash|log|observability)\b/.test(featureText);
 
+  // Detect explicit backend/DB technology choices in the description.
+  // When the user already names a specific backend framework or database,
+  // do NOT override their intent with an all-in-one managed platform bundle.
+  const hasExplicitBackend = /\b(spring boot|spring framework|django|fastapi|flask|nestjs|nest\.js|express|laravel|rails|ruby on rails|go server|golang|rust server|hapi|koa|feathers|strapi|hasura|graphql server)\b/.test(descText);
+  const hasExplicitDB = /\b(postgresql|postgres|mysql|mariadb|mongodb|cassandra|redis|dynamodb|cockroachdb|planetscale|turso|sqlite)\b/.test(descText);
+  // If the user explicitly chose a backend or database, managed bundles would
+  // contradict their specification — skip bundle detection entirely.
+  const hasExplicitStack = hasExplicitBackend || hasExplicitDB;
+
   // Supabase bundle: Auth + Database + (Storage/Realtime/Edge)
-  if (hasAuth && hasDB && !hasPayments) {
+  // Only fires when no explicit stack is mentioned, payments are absent, and the
+  // project is not a dedicated backend (where Hasura is a better fit).
+  if (hasAuth && hasDB && !hasPayments && !hasExplicitStack && type !== "backend_api") {
     return {
       name: "Supabase Full Stack",
       recommendedPlatform: "Supabase",
@@ -527,7 +548,8 @@ function detectFeatureBundle(features: string[], projectType?: string): FeatureB
   }
 
   // Firebase bundle: Auth + Database + Analytics + Notifications
-  if (hasAuth && hasDB && (hasAnalytics || hasEmail || hasRealtime)) {
+  // Requires all three signals and no explicit stack override.
+  if (hasAuth && hasDB && !hasExplicitStack && (hasAnalytics || hasEmail) && hasRealtime) {
     return {
       name: "Firebase/Google Cloud Bundle",
       recommendedPlatform: "Firebase",
@@ -547,7 +569,7 @@ function detectFeatureBundle(features: string[], projectType?: string): FeatureB
   }
 
   // Vercel AI SDK bundle: AI + Streaming + Data fetching
-  if (hasAI && hasRealtime) {
+  if (hasAI && hasRealtime && !hasExplicitStack) {
     return {
       name: "Vercel AI SDK Stack",
       recommendedPlatform: "Vercel AI SDK + Neon + Vercel",
@@ -578,6 +600,7 @@ function detectFeatureBundle(features: string[], projectType?: string): FeatureB
 
   return null;
 }
+
 
 /**
  * Formats the full list of eligible registry tools into a structured block
@@ -681,7 +704,7 @@ export async function suggestForCategory(
         prompt,
         tier2Schema,
         2,
-        MODELS.CONTENT,
+        MODELS.FAST,
       );
 
       let candidates: SuggestionCandidate[] = r.candidates.map((c) => {

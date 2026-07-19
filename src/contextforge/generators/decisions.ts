@@ -15,13 +15,13 @@ export async function generateDecisions(spec: ProjectSpec, sharedContext: string
 Be extremely specific. Include real code. Every statement must apply to this project specifically, not software development in general.
 ${sharedContext}`;
 
-  await Promise.all(
-    entries.map(async ([category, entry], index) => {
-      const chosen = entry.value;
-      const numberStr = String(index + 1).padStart(3, "0");
-      const filename = decisionFileName(spec, category);
+  for (let index = 0; index < entries.length; index++) {
+    const [category, entry] = entries[index];
+    const chosen = entry.value;
+    const numberStr = String(index + 1).padStart(3, "0");
+    const filename = decisionFileName(spec, category);
 
-      const userPrompt = `Generate a complete ADR for:
+    const userPrompt = `Generate a complete ADR for:
 
 Project: ${spec.projectName}
 Decision: ${category} — chosen tool: ${chosen}
@@ -67,35 +67,34 @@ Example: 'All database rows owned by a user must have user_id text referencing t
 ## Common AI Mistakes With ${chosen}
 3-5 specific mistakes AI assistants commonly make when using ${chosen}, with the correct approach for each.`;
 
-      let content = "";
-      if (isClaudeConfigured()) {
-        try {
-          const responseSchema = z.object({
-            content: z.string().describe("The fully formatted markdown content for the ADR"),
-          });
+    let content = "";
+    if (isClaudeConfigured()) {
+      try {
+        const responseSchema = z.object({
+          content: z.string().describe("The fully formatted markdown content for the ADR"),
+        });
 
-          const result = await claudeJson(
-            systemPrompt,
-            userPrompt,
-            responseSchema,
-            1,
-            MODELS.REASONING,
-          );
-          content = result.content;
-        } catch (e) {
-          content = fallbackDecision(spec, category, entry);
-        }
-      } else {
+        const result = await claudeJson(
+          systemPrompt,
+          userPrompt,
+          responseSchema,
+          1,
+          MODELS.REASONING,
+        );
+        content = result.content;
+      } catch (e) {
         content = fallbackDecision(spec, category, entry);
       }
+    } else {
+      content = fallbackDecision(spec, category, entry);
+    }
 
-      if (entry.confidence === "low") {
-        content = `> ⚠️ LOW CONFIDENCE: This tool was community-suggested. Verify all code examples against current official documentation before using.\n\n` + content;
-      }
+    if (entry.confidence === "low") {
+      content = `> ⚠️ LOW CONFIDENCE: This tool was community-suggested. Verify all code examples against current official documentation before using.\n\n` + content;
+    }
 
-      files[filename] = content;
-    })
-  );
+    files[filename] = content;
+  }
 
   return files;
 }

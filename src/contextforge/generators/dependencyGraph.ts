@@ -9,14 +9,23 @@ const orderSchema = z.object({
 });
 
 const PRIORITY: Array<{ keywords: string[]; weight: number; reason: string }> = [
-  { keywords: ["auth", "login", "signup"], weight: 0, reason: "Most features depend on knowing who the user is." },
-  { keywords: ["profile", "account"], weight: 1, reason: "User profile data builds on the authentication layer." },
-  { keywords: ["onboard"], weight: 2, reason: "Onboarding requires the core user model to exist first." },
-  { keywords: ["ai", "chat", "tutor"], weight: 6, reason: "AI features integrate on top of the core experience." },
-  { keywords: ["video", "lesson"], weight: 6, reason: "Media features integrate on top of the core experience." },
+  // Database schema and migrations must be the absolute foundation
+  { keywords: ["schema", "migration", "database schema", "db setup"], weight: 0, reason: "Database schema must exist before any feature that reads or writes data." },
+  // Registration MUST come before login — you cannot log in before an account exists
+  { keywords: ["register", "signup", "sign up", "registration", "create account"], weight: 1, reason: "User registration must exist before login — an account must be created before it can be authenticated." },
+  { keywords: ["auth", "login", "sign in", "sign-in", "session", "jwt"], weight: 2, reason: "Authentication builds on the user registration system." },
+  { keywords: ["profile", "account", "user profile"], weight: 3, reason: "User profile data builds on the authentication layer." },
+  { keywords: ["onboard", "onboarding", "getting started"], weight: 4, reason: "Onboarding requires the core user model to exist first." },
+  // Messaging and realtime fundamentals before advanced features
+  { keywords: ["message", "channel", "chat", "direct message", "private message"], weight: 5, reason: "Core messaging features are the primary product value." },
+  { keywords: ["group chat", "group", "broadcast"], weight: 6, reason: "Group and broadcast features build on the core messaging layer." },
+  { keywords: ["websocket", "realtime", "real-time", "live updates"], weight: 5, reason: "Real-time transport must be established before features that depend on it." },
+  { keywords: ["ai", "tutor", "assistant", "llm"], weight: 7, reason: "AI features integrate on top of the core experience." },
+  { keywords: ["video", "lesson", "media"], weight: 7, reason: "Media features integrate on top of the core experience." },
   { keywords: ["payment", "billing", "subscription"], weight: 8, reason: "Monetization should land after the core product works." },
-  { keywords: ["admin", "analytics"], weight: 9, reason: "Operational tooling comes last." },
+  { keywords: ["admin", "analytics", "reporting", "dashboard"], weight: 9, reason: "Operational tooling comes last." },
 ];
+
 
 function heuristicOrder(spec: ProjectSpec): Array<{ feature: string; reason: string }> {
   const scored = spec.features.map((feature, index) => {

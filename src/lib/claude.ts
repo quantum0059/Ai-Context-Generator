@@ -30,8 +30,9 @@ export async function claudeJson<T>(
   schema: z.ZodType<T>,
   retries = 2,
   model: AiModel | undefined = undefined,
+  maxTokens?: number,
 ): Promise<T> {
-  return getProvider().json(systemPrompt, userPrompt, schema, retries, model);
+  return getProvider().json(systemPrompt, userPrompt, schema, retries, model, maxTokens);
 }
 
 /**

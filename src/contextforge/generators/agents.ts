@@ -184,18 +184,42 @@ function fallbackAgents(spec: ProjectSpec): string {
     let rules = '';
     if (toolLow.includes('next')) {
       rules = `- All ${category} pages are **Server Components by default**. Add \`'use client'\` only when the file uses React hooks, browser APIs, or event handlers.\n- Fetch data in Server Components, pass as props to Client Components.\n- All API routes live in \`src/app/api/\` as \`route.ts\` files.`;
+    } else if (toolLow.includes('spring') || toolLow.includes('spring boot')) {
+      rules = `- All REST controllers are annotated with \`@RestController\` and live in \`src/main/java/.../controller/\`.\n- Business logic lives in \`@Service\` classes — never in controllers.\n- Use \`@Repository\` interfaces extending \`JpaRepository<Entity, UUID>\` for all database access.\n- Validate request bodies with \`@Valid\` + Bean Validation (\`@NotBlank\`, \`@Size\`, etc.).\n- Security configuration in \`SecurityConfig.java\` — every non-public endpoint requires a valid JWT.`;
+    } else if (toolLow.includes('express') || toolLow.includes('fastify') || toolLow.includes('nestjs') || toolLow.includes('hono') || toolLow.includes('koa')) {
+      rules = `- All route handlers live in \`src/routes/\` — one file per resource.\n- Business logic lives in \`src/services/\` — routes only orchestrate; they do not contain SQL or SDK calls.\n- Validate request bodies with Zod at the route boundary before passing to services.\n- All async handlers must be wrapped in try/catch and return consistent \`ApiErrorResponse\` shapes on failure.`;
     } else if (toolLow.includes('clerk')) {
       rules = `- Use \`auth()\` from \`@clerk/nextjs/server\` in API routes and Server Components.\n- Use \`clerkMiddleware()\` in \`src/middleware.ts\` for route protection.\n- NEVER use \`useUser()\` outside Client Components.`;
+    } else if (toolLow.includes('auth0')) {
+      rules = `- Use \`getSession()\` from \`@auth0/nextjs-auth0\` in API routes and Server Components to retrieve the session.\n- Protect routes with \`withApiAuthRequired()\` (API) or \`withPageAuthRequired()\` (pages).\n- Never decode or trust the raw JWT on the client — always verify server-side.\n- Auth0 callback URL must be registered in the Auth0 dashboard.`;
+    } else if (toolLow.includes('nextauth') || toolLow.includes('next-auth')) {
+      rules = `- Configure providers in \`src/app/api/auth/[...nextauth]/route.ts\`.\n- Use \`getServerSession(authOptions)\` in server components and API routes — never \`getSession()\` on the server.\n- Protect routes via the \`middleware.ts\` matcher, not via per-page checks.`;
+    } else if (toolLow.includes('jwt') || toolLow.includes('jsonwebtoken') || toolLow.includes('jose')) {
+      rules = `- Sign tokens only on the server with a secret from environment variables (never hardcode).\n- Verify the token signature on EVERY protected API request before processing the payload.\n- Store tokens in HttpOnly cookies or secure storage — never \`localStorage\`.\n- Include \`exp\` (expiry) in every token; reject expired tokens with HTTP 401.`;
+    } else if (toolLow.includes('passport')) {
+      rules = `- Configure strategies in \`src/auth/passport.ts\` and register via \`passport.use()\`.\n- Use \`passport.authenticate()\` as route middleware — never call \`req.user\` before authentication middleware runs.`;
     } else if (toolLow.includes('supabase')) {
       rules = `- All Supabase queries MUST include a \`.eq('user_id', userId)\` filter — RLS is enabled on all tables.\n- Import Supabase only in \`src/services/\` or \`src/lib/supabase/\` — never in components or routes.\n- Realtime subscriptions must call \`supabase.removeChannel()\` in the cleanup function.`;
     } else if (toolLow.includes('stripe')) {
       rules = `- Checkout sessions are created in \`src/app/api/billing/checkout/route.ts\`.\n- Stripe webhook handler lives at \`src/app/api/webhooks/stripe/route.ts\` and MUST verify signatures with \`stripe.webhooks.constructEvent()\`.\n- Never grant access at the checkout redirect — wait for the webhook.`;
     } else if (toolLow.includes('prisma')) {
       rules = `- Import \`prisma\` only from \`src/lib/prisma.ts\` singleton — never create \`new PrismaClient()\` in a request handler.\n- Use \`prisma.$transaction()\` for multi-table writes.`;
+    } else if (toolLow.includes('drizzle')) {
+      rules = `- Import \`db\` only from \`src/lib/db.ts\` — never instantiate drizzle inline.\n- Use \`db.transaction()\` for multi-table writes.\n- All schema definitions live in \`src/lib/schema.ts\`.`;
     } else if (toolLow.includes('zustand')) {
       rules = `- Stores live in \`src/stores/<domain>Store.ts\`. One store per domain.\n- Define all mutations inside the store definition — never call \`set()\` from outside.\n- UI state (filters, selections) goes in stores; server data goes through the service layer.`;
+    } else if (toolLow.includes('redux')) {
+      rules = `- Slices live in \`src/store/slices/<domain>Slice.ts\`.\n- Use \`createAsyncThunk\` for all async operations — never dispatch from sagas or effects manually.\n- Never mutate state directly outside of \`createSlice\` reducers.`;
     } else if (toolLow.includes('better-sqlite3')) {
       rules = `- \`better-sqlite3\` is SYNCHRONOUS — do not use \`async/await\`.\n- Cache prepared statements at module level. Never prepare inside a loop.\n- Enable WAL mode and foreign keys on startup.`;
+    } else if (toolLow.includes('postgresql') || toolLow.includes('postgres') || toolLow.includes('pg ') || toolLow === 'pg') {
+      rules = `- Use parameterised queries ($1, $2, ...) — never string-interpolate values into SQL.\n- Acquire connections from a pool (\`pg.Pool\`) — never create a new \`Client\` per request.\n- Wrap multi-statement operations in explicit \`BEGIN/COMMIT/ROLLBACK\` transactions.`;
+    } else if (toolLow.includes('mongodb') || toolLow.includes('mongoose')) {
+      rules = `- Always scope queries with the user/tenant identifier — never query without a filter.\n- Define schemas with Mongoose \`Schema\` + \`model()\` — never use raw \`collection.insertOne\` in application code.\n- Use lean queries (\`.lean()\`) for read-only operations to avoid Mongoose document overhead.`;
+    } else if (toolLow.includes('redis')) {
+      rules = `- Connect once via a shared client instance (\`src/lib/redis.ts\`) — never create a new client per request.\n- Always set a TTL (\`EX\`/\`PX\`) on every key unless explicitly modelling persistent data.\n- Use Redis only for caching and ephemeral state — never as the primary database.`;
+    } else if (toolLow.includes('react native') || toolLow.includes('expo')) {
+      rules = `- Use \`<View>\` / \`<Text>\` / \`<Pressable>\` — NEVER HTML elements (\`<div>\`, \`<span>\`, \`<button>\`).\n- Navigation via Expo Router (file-based) — no manual \`react-navigation\` stack setup.\n- All SDK calls (network, storage, notifications) live in \`src/services/\` — never inline in components.\n- Use \`Platform.OS\` for any platform-specific branching.`;
     } else {
       rules = `- All ${category} concerns go through **${tool}** exclusively.\n- See \`${decisionFileName(spec, category)}\` for integration patterns.`;
     }

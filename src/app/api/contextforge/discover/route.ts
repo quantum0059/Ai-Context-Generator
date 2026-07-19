@@ -1,6 +1,7 @@
 import { discoverCategories } from "../../../../contextforge/discovery";
 import { draftInputSchema } from "../../../../contextforge/spec";
 import { checkRateLimit, getRateLimitIdentifier } from "../../../../lib/rateLimit";
+import { withCompression } from "../../../../lib/compression";
 
 /**
  * Dynamic Category Discovery (Section 3): one Claude call determines which
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
   }
   try {
     const result = await discoverCategories(parsed.data);
-    return Response.json(result);
+    return withCompression(result, req);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Category discovery failed";
     return Response.json({ error: message }, { status: 500 });

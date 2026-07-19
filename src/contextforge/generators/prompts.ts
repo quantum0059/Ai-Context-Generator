@@ -18,12 +18,10 @@ export async function generatePrompts(spec: ProjectSpec, sharedContext: string =
     const featureSlug = slugify(feature);
     const aspects = await getFeatureAspects(spec, feature, sharedContext);
 
-    const aspectPromises = aspects.map(async (aspect) => {
+    for (const aspect of aspects) {
       const generatedContent = await generateAspectPrompt(spec, feature, aspect, priorFeatures, sharedContext);
       files[`prompts/${featureSlug}/${aspect.aspect}.md`] = generatedContent;
-    });
-
-    await Promise.all(aspectPromises);
+    }
   }
 
   return files;

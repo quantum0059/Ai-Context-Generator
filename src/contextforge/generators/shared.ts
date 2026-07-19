@@ -354,6 +354,161 @@ export async function GET() {
 // ❌ NEVER: import { useUser } from '@clerk/nextjs' in Server Components
 \`\`\``;
   },
+  auth0: () => `\`\`\`typescript
+// src/lib/auth0.ts — server-side session helper
+import { getSession, withApiAuthRequired } from '@auth0/nextjs-auth0';
+
+// In a Server Component or API route
+export const GET = withApiAuthRequired(async function handler(req) {
+  const session = await getSession();
+  if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const { user } = session;
+  return Response.json({ userId: user.sub, email: user.email });
+});
+
+// Protecting a Next.js page
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+export default withPageAuthRequired(function Dashboard({ user }) {
+  return <div>Hello, {user.name}</div>;
+});
+
+// Auth0 env vars required: AUTH0_SECRET, AUTH0_BASE_URL, AUTH0_ISSUER_BASE_URL, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET
+// ❌ NEVER: use @clerk/nextjs/server — the auth provider is Auth0
+\`\`\``,
+
+  'jwt': () => `\`\`\`typescript
+// src/lib/jwt.ts
+import jwt from 'jsonwebtoken';
+
+const SECRET = process.env.JWT_SECRET!;
+
+export function signToken(payload: object, expiresIn = '7d'): string {
+  return jwt.sign(payload, SECRET, { expiresIn });
+}
+
+export function verifyToken<T>(token: string): T {
+  return jwt.verify(token, SECRET) as T; // throws if invalid or expired
+}
+
+// In middleware / route guard:
+const token = req.headers.authorization?.replace('Bearer ', '');
+if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+const payload = verifyToken<{ userId: string }>(token);
+
+// ❌ NEVER: store the JWT in localStorage — use HttpOnly cookies
+// ❌ NEVER: skip signature verification
+\`\`\``,
+
+  'spring boot': () => `\`\`\`java
+// UserController.java
+@RestController
+@RequestMapping("/api/users")
+@RequiredArgsConstructor
+public class UserController {
+  private final UserService userService;
+
+  @GetMapping("/{id}")
+  public ResponseEntity<UserDto> getUser(@PathVariable UUID id) {
+    return ResponseEntity.ok(userService.findById(id));
+  }
+
+  @PostMapping
+  public ResponseEntity<UserDto> createUser(@Valid @RequestBody CreateUserRequest req) {
+    return ResponseEntity.status(201).body(userService.create(req));
+  }
+}
+
+// UserRepository.java
+public interface UserRepository extends JpaRepository<User, UUID> {
+  Optional<User> findByEmail(String email);
+}
+
+// JWT filter — SecurityConfig.java
+// Every protected route requires Authorization: Bearer <token>
+// ❌ NEVER: put business logic in controllers
+// ❌ NEVER: use field injection (@Autowired) — use constructor injection
+`,
+
+  postgresql: () => `\`\`\`typescript
+// src/lib/db.ts — shared connection pool
+import { Pool } from 'pg';
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Parameterised query (NEVER string-interpolate user input into SQL)
+export async function query<T>(text: string, params?: unknown[]): Promise<T[]> {
+  const { rows } = await pool.query(text, params);
+  return rows as T[];
+}
+
+// Usage:
+const users = await query<User>('SELECT * FROM users WHERE id = $1', [userId]);
+
+// Transaction:
+const client = await pool.connect();
+try {
+  await client.query('BEGIN');
+  await client.query('INSERT INTO messages (content, sender_id) VALUES ($1, $2)', [content, senderId]);
+  await client.query('COMMIT');
+} catch (e) {
+  await client.query('ROLLBACK');
+  throw e;
+} finally {
+  client.release();
+}
+// ❌ NEVER: new Client() per request — always use the pool
+// ❌ NEVER: \'SELECT * FROM users WHERE id = \' + userId — use parameterised queries
+\`\`\``,
+
+  websocket: () => `\`\`\`typescript
+// src/lib/websocket.ts — WebSocket server setup (Node.js ws library)
+import { WebSocketServer, WebSocket } from 'ws';
+
+const clients = new Map<string, WebSocket>(); // userId → socket
+
+export function setupWebSocketServer(server: http.Server) {
+  const wss = new WebSocketServer({ server });
+  wss.on('connection', (ws, req) => {
+    const userId = extractUserIdFromRequest(req); // verify JWT here
+    if (!userId) { ws.close(1008, 'Unauthorized'); return; }
+    clients.set(userId, ws);
+    ws.on('close', () => clients.delete(userId));
+    ws.on('message', (data) => handleMessage(userId, data));
+  });
+}
+
+export function sendToUser(userId: string, payload: object) {
+  const ws = clients.get(userId);
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+}
+// ❌ NEVER: broadcast without auth check
+// ❌ NEVER: store messages in the WebSocket server — persist to DB first
+\`\`\``,
+
+  'react native': (platform) => `\`\`\`typescript
+// ✅ Always use React Native primitives
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+
+export function Button({ onPress, label }: { onPress: () => void; label: string }) {
+  return (
+    <Pressable style={styles.button} onPress={onPress}>
+      <Text style={styles.label}>{label}</Text>
+    </Pressable>
+  );
+}
+const styles = StyleSheet.create({ button: { padding: 12 }, label: { color: '#fff' } });
+
+// Navigation — Expo Router (file-based)
+import { router } from 'expo-router';
+router.push('/chat');
+
+// API calls live in services, not components
+import { messageService } from '@/services/messageService';
+const messages = await messageService.getHistory(channelId);
+
+// ❌ NEVER: <div>, <span>, <button> — HTML does not exist in React Native
+// ❌ NEVER: import from 'next/*' in a React Native project
+\`\`\``,
+
   supabase: () => `\`\`\`typescript
 // src/lib/supabase/client.ts
 import { createBrowserClient } from '@supabase/ssr';
@@ -630,14 +785,19 @@ export function buildSharedDatabaseSchema(spec: ProjectSpec): string {
     .map((e) => {
       const cols = ['id uuid primary key default gen_random_uuid()', 'created_at timestamptz default now()', 'updated_at timestamptz default now()'];
       const hasUserId = spec.features.some((f) => /auth|user|profile/.test(f.toLowerCase()));
-      if (hasUserId && e.name !== 'users') cols.push('user_id text not null references users(id) on delete cascade');
+      // user_id MUST be uuid to match users.id (uuid PK) — text would cause a type mismatch
+      if (hasUserId && e.name !== 'users') cols.push('user_id uuid not null references users(id) on delete cascade');
       // Add custom columns from entity attributes (skip generic ones already added)
       const skip = new Set(['id', 'created_at', 'updated_at', 'user_id', 'userid']);
       e.columns.filter((c) => !skip.has(c.toLowerCase().replace(/\s+/g, '_'))).forEach((c) => {
         cols.push(`${c.toLowerCase().replace(/\s+/g, '_')} text`);
       });
+      // Supabase RLS: users table uses auth.uid() = id; other tables use auth.uid() = user_id
+      // Both sides are uuid — no cast needed
       const rlsBlock = isSupabase
-        ? `\nalter table ${e.name} enable row level security;\ncreate policy "Users own their rows" on ${e.name} using (auth.uid()::text = user_id);`
+        ? e.name === 'users'
+          ? `\nalter table ${e.name} enable row level security;\ncreate policy "Users own their rows" on ${e.name} using (auth.uid() = id);`
+          : `\nalter table ${e.name} enable row level security;\ncreate policy "Users own their rows" on ${e.name} using (auth.uid() = user_id);`
         : '';
       return `create table if not exists ${e.name} (\n  ${cols.join(',\n  ')}\n);${rlsBlock}`;
     })

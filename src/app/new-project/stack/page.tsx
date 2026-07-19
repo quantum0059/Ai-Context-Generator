@@ -132,6 +132,7 @@ export default function StackPage() {
           Object.entries(state.stack).filter(([key]) => allowed.has(key)),
         );
         updateState({
+          technicalConstraints: data.technicalConstraints,
           fullCategories: relevant,
           stack: relevantStack,
           projectType: data.projectType ?? state.projectType,
@@ -166,9 +167,18 @@ export default function StackPage() {
           constraints: { budget: state.budget || undefined, avoid: split(state.avoid) },
           projectType: state.projectType,
           classificationReason: state.classificationReason,
+          // Pass current locked stack entries so affinity rules can fire correctly
+          // (e.g. prefer Supabase Auth when Supabase is already chosen for DB).
+          stack: Object.fromEntries(
+            Object.entries(state.stack)
+              .filter(([, entry]) => entry?.value)
+              .map(([cat, entry]) => [cat, { value: entry.value, source: entry.source ?? "user" }]),
+          ),
         };
 
-        const resolved = await Promise.all(categories.map(async (category) => {
+        const resolved: Array<readonly [string, SuggestionOption[], Pick<SuggestionResolution, "recommendationSummary" | "tradeoffs">]> = [];
+        for (const category of categories) {
+          if (cancelled) break;
           const discoveredOptions: SuggestionOption[] = (category.suggestedTools ?? []).map((tool) => ({
             name: tool.name,
             rationale: tool.reason,
@@ -179,14 +189,15 @@ export default function StackPage() {
           // Discovery already supplied grounded tools for specialized concerns.
           // Use them immediately instead of replacing them with generic AI output.
           if (category.isCustom && discoveredOptions.length > 0) {
-            return [
+            resolved.push([
               category.key,
               discoveredOptions,
               {
                 recommendationSummary: `${discoveredOptions[0]?.name} is the strongest default for this specialized requirement. ${discoveredOptions[0]?.rationale ?? ""}`.trim(),
                 tradeoffs: discoveredOptions.slice(1).map((option) => `${option.name}: ${option.rationale}`),
               },
-            ] as const;
+            ]);
+            continue;
           }
           const response = await fetch("/api/contextforge/suggest", {
             method: "POST",
@@ -208,15 +219,15 @@ export default function StackPage() {
           const primaryOptions = category.isCustom ? discoveredOptions : apiOptions;
           const alternativeOptions = category.isCustom ? apiOptions : discoveredOptions;
           const names = new Set(primaryOptions.map((option) => option.name.toLowerCase()));
-          return [
+          resolved.push([
             category.key,
             [...primaryOptions, ...alternativeOptions.filter((option) => !names.has(option.name.toLowerCase()))],
             {
               recommendationSummary: suggestionData.recommendationSummary,
               tradeoffs: suggestionData.tradeoffs,
             },
-          ] as const;
-        }));
+          ]);
+        }
 
         if (cancelled) return;
         const nextSuggestions: Record<string, SuggestionOption[]> = Object.fromEntries(

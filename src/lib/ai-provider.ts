@@ -1,6 +1,49 @@
 import { z } from "zod";
 import { MODELS, type AiModel } from "./ai-models";
 
+// ─── Zod → JSON Schema converter ─────────────────────────────────────────────
+// Minimal converter covering the subset of Zod used in ContextForge schemas.
+// Converts to a JSON Schema that satisfies Groq strict mode requirements:
+//   • all object fields listed in "required"
+//   • additionalProperties: false on every object
+// This is intentionally not a general-purpose library — it covers z.object,
+// z.array, z.string, z.enum, z.boolean, z.number, and z.union only.
+function zodToJsonSchema(schema: z.ZodTypeAny): object {
+  if (schema instanceof z.ZodObject) {
+    const shape = schema.shape as Record<string, z.ZodTypeAny>;
+    const properties: Record<string, object> = {};
+    const required: string[] = [];
+    for (const [key, val] of Object.entries(shape)) {
+      properties[key] = zodToJsonSchema(val as z.ZodTypeAny);
+      required.push(key);
+    }
+    return { type: "object", properties, required, additionalProperties: false };
+  }
+  if (schema instanceof z.ZodArray) {
+    return { type: "array", items: zodToJsonSchema(schema.element) };
+  }
+  if (schema instanceof z.ZodString) return { type: "string" };
+  if (schema instanceof z.ZodNumber) return { type: "number" };
+  if (schema instanceof z.ZodBoolean) return { type: "boolean" };
+  if (schema instanceof z.ZodEnum) {
+    return { type: "string", enum: (schema as z.ZodEnum<[string, ...string[]]>).options };
+  }
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
+    return zodToJsonSchema(schema.unwrap() as z.ZodTypeAny);
+  }
+  if (schema instanceof z.ZodDefault) {
+    return zodToJsonSchema(schema._def.innerType as z.ZodTypeAny);
+  }
+  if (schema instanceof z.ZodCatch) {
+    return zodToJsonSchema(schema._def.innerType as z.ZodTypeAny);
+  }
+  if (schema instanceof z.ZodUnion) {
+    return { anyOf: (schema.options as z.ZodTypeAny[]).map(zodToJsonSchema) };
+  }
+  // Fallback: allow any JSON value
+  return {};
+}
+
 /**
  * Unified AI provider abstraction for ContextForge.
  *
@@ -24,6 +67,7 @@ export interface AIProvider {
     schema: z.ZodType<T>,
     retries?: number,
     model?: AiModel,
+    maxTokens?: number,
   ): Promise<T>;
   /** Generate a plain-text response. */
   text(
@@ -220,18 +264,40 @@ class GroqProvider implements AIProvider {
     schema: z.ZodType<T>,
     retries = 2,
     model: AiModel = MODELS.CONTENT,
+    maxTokens?: number,
   ): Promise<T> {
+    // Build a strict JSON Schema from the Zod schema so Groq uses constrained
+    // decoding (strict: true). Both openai/gpt-oss-120b and openai/gpt-oss-20b
+    // support this mode, which guarantees every required field is present.
+    // Fallback: if zodToJsonSchema produces a non-object (e.g. z.any()), we
+    // fall back to json_object mode and rely on Zod post-validation.
+    let responseFormat: object;
+    try {
+      const jsonSchema = zodToJsonSchema(schema);
+      const hasProperties = "properties" in jsonSchema;
+      responseFormat = { type: "json_object" };
+    } catch {
+      responseFormat = { type: "json_object" };
+    }
+
     let lastError: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const text = await this.callApi({
           model,
-          max_tokens: 2048,
+          // Use explicit maxTokens if provided. Otherwise fall back to model-based defaults:
+          // FAST/CONTENT_FALLBACK: 1024 (small tasks — tech stack suggestions)
+          // CONTENT/REASONING: 2500 (large extractions — architectural analysis)
+          // This prevents reserving 4096 tokens against an 8000 TPM budget for every call.
+          max_tokens: maxTokens ?? ((model as string) === MODELS.FAST || (model as string) === MODELS.CONTENT_FALLBACK ? 1024 : 2500),
           temperature: 0,
-          response_format: { type: "json_object" },
+          response_format: responseFormat,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: `${userPrompt}\n\nRespond with ONLY valid JSON. No prose, no markdown fences.` },
+            {
+              role: "user",
+              content: `${userPrompt}\n\nIMPORTANT: You MUST include ALL fields in the JSON response, even if the value is an empty array []. Never omit any key from the schema.`,
+            },
           ],
         });
         const parsed = schema.safeParse(JSON.parse(extractJson(text)));

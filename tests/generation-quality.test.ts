@@ -37,16 +37,22 @@ const spec: ProjectSpec = {
 };
 
 describe("generation model roles", () => {
-  it("uses the requested Groq models", () => {
-    expect(MODELS.FAST).toBe("llama-3.1-8b-instant");
-    expect(MODELS.CONTENT).toBe("llama-3.3-70b-versatile");
-    expect(MODELS.CONTENT_FALLBACK).toBe("llama-3.1-8b-instant");
-    expect(MODELS.REASONING).toBe("deepseek-r1-distill-llama-70b");
+  it("uses the current live Groq models (verified against console.groq.com/docs/models)", () => {
+    // openai/gpt-oss-20b  — replaces llama-3.1-8b-instant (deprecated 2026-08-16)
+    expect(MODELS.FAST).toBe("openai/gpt-oss-20b");
+    // openai/gpt-oss-120b — replaces llama-3.3-70b-versatile (deprecated 2026-08-16)
+    expect(MODELS.CONTENT).toBe("openai/gpt-oss-120b");
+    // openai/gpt-oss-20b  — replaces llama-3.1-8b-instant (deprecated 2026-08-16)
+    expect(MODELS.CONTENT_FALLBACK).toBe("openai/gpt-oss-20b");
+    // openai/gpt-oss-120b — replaces deepseek-r1-distill-llama-70b (decommissioned 2025-10-02)
+    expect(MODELS.REASONING).toBe("openai/gpt-oss-120b");
   });
 
-  it("retries a rate-limited content request once with the content fallback", async () => {
+  it("retries a rate-limited content request with the content fallback", async () => {
     process.env.GROQ_API_KEY = "test-key";
     const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
       .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         choices: [{ message: { content: "generated content" } }],
@@ -54,7 +60,8 @@ describe("generation model roles", () => {
 
     await expect(groqText("Generate", "", 0, MODELS.CONTENT)).resolves.toBe("generated content");
     const models = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).model);
-    expect(models).toEqual([MODELS.CONTENT, MODELS.CONTENT_FALLBACK]);
+    // First 3 calls: retry on CONTENT with backoff. 4th call: fall back to CONTENT_FALLBACK.
+    expect(models).toEqual([MODELS.CONTENT, MODELS.CONTENT, MODELS.CONTENT, MODELS.CONTENT_FALLBACK]);
   });
 });
 

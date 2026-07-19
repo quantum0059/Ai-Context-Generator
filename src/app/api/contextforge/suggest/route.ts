@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { draftInputSchema } from "../../../../contextforge/spec";
 import { suggestForCategory } from "../../../../contextforge/suggestions";
+import { withCompression } from "../../../../lib/compression";
 
 const requestSchema = z.object({
   category: z.string().min(1),
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
   try {
     const result = await suggestForCategory(parsed.data.category, parsed.data.draft);
     console.log(`[Suggest API] Successfully resolved ${result.candidates.length} candidates for ${parsed.data.category}`);
-    return Response.json(result);
+    return withCompression(result, req);
   } catch (err) {
     console.error(`[Suggest API] Uncaught error:`, err);
     const message = err instanceof Error ? err.message : "Suggestion resolution failed";

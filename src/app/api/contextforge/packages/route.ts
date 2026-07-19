@@ -1,8 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { getSupabase, isClerkConfigured } from "../../../../lib/supabase";
+import { withCompression } from "../../../../lib/compression";
 
 /** Lists the saved packages (spec + versions) for the signed-in user. */
-export async function GET() {
+export async function GET(req: Request) {
   if (!isClerkConfigured()) {
     return Response.json({ error: "Clerk is not configured." }, { status: 503 });
   }
@@ -20,5 +21,5 @@ export async function GET() {
     .eq("user_id", userId)
     .order("generated_at", { ascending: false });
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json({ packages: data ?? [] });
+  return withCompression({ packages: data ?? [] }, req);
 }

@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../lib/claude";
 import { extractProjectConstraints } from "./constraint-extractor";
+import {
+  callGroqJsonWithKey,
+  estimateGroqRequestTokens,
+  groqKeyPool,
+  shouldUseGroqKeyPool,
+} from "./groq-key-pool";
 import type {
   ArchitecturalRequirements,
   DomainModel,
@@ -345,41 +351,88 @@ Platform: ${platform}
 Description:
 ${description}
 
-Return this exact JSON structure:
+Critical rules:
+- functional must be EXTREMELY granular — every independent user-facing capability is its own FR. DO NOT collapse (e.g. 'Background removal' and 'Upscaling' must be separate FRs).
+- functional must include BOTH explicit (stated) AND implicit (inferred) requirements.
+- nonFunctional must have at least one entry per sub-category where applicable; use [] only if truly not applicable.
+- edgeCases must include at least 5 realistic failure scenarios for this specific domain.
+- Every string must be specific to THIS project — no generic boilerplate.
+
+Return ONLY valid JSON exactly matching this structure:
 {
-  "businessGoals": ["..."],
-  "successCriteria": ["..."],
-  "targetAudience": ["..."],
+  "businessGoals": ["string"],
+  "successCriteria": ["string"],
+  "targetAudience": ["string"],
   "domain": {
-    "actors": [{ "name": "...", "description": "...", "permissions": ["..."] }],
-    "entities": [{ "name": "...", "description": "...", "attributes": ["..."], "relatedEntities": ["..."] }],
-    "coreWorkflows": ["..."]
+    "actors": [
+      {
+        "name": "string",
+        "description": "string",
+        "permissions": ["string"]
+      }
+    ],
+    "entities": [
+      {
+        "name": "string",
+        "description": "string",
+        "attributes": ["string"],
+        "relatedEntities": ["string"]
+      }
+    ],
+    "coreWorkflows": ["string"]
   },
   "functional": [
-    { "id": "FR-001", "title": "...", "description": "...", "type": "explicit|implicit", "actors": ["..."], "priority": "must-have|should-have|nice-to-have" }
+    {
+      "id": "string",
+      "title": "string",
+      "description": "string",
+      "type": "explicit" | "implicit",
+      "actors": ["string"],
+      "priority": "must-have" | "should-have" | "nice-to-have"
+    }
   ],
   "nonFunctional": {
-    "performance": ["..."],
-    "security": ["..."],
-    "scalability": ["..."],
-    "availability": ["..."],
-    "accessibility": ["..."],
-    "compliance": ["..."],
-    "maintainability": ["..."],
-    "other": ["..."]
+    "performance": ["string"],
+    "security": ["string"],
+    "scalability": ["string"],
+    "availability": ["string"],
+    "accessibility": ["string"],
+    "compliance": ["string"],
+    "maintainability": ["string"],
+    "other": ["string"]
   },
   "edgeCases": [
-    { "scenario": "...", "expectedBehaviour": "...", "category": "network|data|auth|concurrency|input-validation|external-service|other" }
+    {
+      "scenario": "string",
+      "expectedBehaviour": "string",
+      "category": "auth" | "data" | "network" | "ui" | "external-service" | "input-validation" | "other"
+    }
   ]
-}
+}`;
 
-Critical rules:
-- functional must be EXTREMELY granular. Every independent user-facing capability must be its own Functional Requirement. DO NOT collapse capabilities (e.g. 'Background removal' and 'Upscaling' must be separate).
-- functional must include BOTH explicit (stated) and implicit (inferred) requirements
-- nonFunctional must have at least one entry per category where applicable; use [] only if truly not applicable
-- edgeCases must include at least 5 realistic scenarios for this domain
-- Every string must be specific to THIS project — no generic boilerplate
-- Return ONLY valid JSON`;
+  const maxTokens = 6000;
+
+  // Output budget: 6000 tokens.
+  // Since discoverCategories was moved to the 20b model, this extractor has the ENTIRE
+  // 8000 TPM limit (120b bucket) to itself! 6000 maxTokens + ~1500 input tokens = 7500 TPM.
+  // This perfectly fits the free tier limit while giving massive projects enough room to finish.
+  if (shouldUseGroqKeyPool()) {
+    const estimatedTokens = estimateGroqRequestTokens(SYSTEM_PROMPT, userPrompt, maxTokens);
+    return groqKeyPool.callWithRotation(
+      MODELS.CONTENT,
+      estimatedTokens,
+      (apiKey) =>
+        callGroqJsonWithKey({
+          apiKey,
+          systemPrompt: SYSTEM_PROMPT,
+          userPrompt,
+          schema: architecturalAnalysisSchema,
+          retries: 0,
+          model: MODELS.CONTENT,
+          maxTokens,
+        }),
+    );
+  }
 
   return await claudeJson(
     SYSTEM_PROMPT,
@@ -387,5 +440,6 @@ Critical rules:
     architecturalAnalysisSchema,
     0,
     MODELS.CONTENT,
+    maxTokens,
   );
 }

@@ -91,6 +91,7 @@ export default function ReviewPage() {
       constraints: {
         budget: state.budget || undefined,
         avoid: split(state.avoid),
+        technical: state.technicalConstraints,
       },
       designReferences: Array.from(new Set([
         ...split(state.designReferences),

@@ -153,11 +153,9 @@ export async function assemblePackage(
   // both AI-generated in parallel and must finish before any downstream
   // generator runs. context.md is listed first in every agent load order.
   console.log("[Generator] 15% generating — Building product context (context.md + agents.md + templates)...");
-  const [contextContent, agentsContent, templateFiles] = await Promise.all([
-    generateContext(validated),
-    generateAgents(validated),
-    Promise.resolve(generateTemplates(validated)), // pure function — wrap for symmetry
-  ]);
+  const contextContent = await generateContext(validated);
+  const agentsContent = await generateAgents(validated);
+  const templateFiles = generateTemplates(validated);
 
   // Build the shared context string that all Phase-2 generators will receive.
   // This string contains the first 100 lines of agents.md and the opening
@@ -166,14 +164,11 @@ export async function assemblePackage(
 
   // ─── Phase 2: AI-driven generators (all receive sharedContext) ───────────
   console.log("[Generator] 25% generating — Generating feature prompts and architecture files...");
-  const [promptFiles, materialFiles, skillFiles, decisionFiles, setupFiles] =
-    await Promise.all([
-      generatePrompts(validated, sharedContext),
-      generatePromptMaterial(validated),
-      Promise.resolve(generateSkills(validated, sharedContext)),
-      generateDecisions(validated, sharedContext),
-      generateSetup(validated, sharedContext),
-    ]);
+  const promptFiles = await generatePrompts(validated, sharedContext);
+  const materialFiles = await generatePromptMaterial(validated);
+  const skillFiles = generateSkills(validated, sharedContext);
+  const decisionFiles = await generateDecisions(validated, sharedContext);
+  const setupFiles = await generateSetup(validated, sharedContext);
 
   // ─── Phase 3: Assemble all files ─────────────────────────────────────────
   console.log("[Generator] 80% generating — Building context manifests...");

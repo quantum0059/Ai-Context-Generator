@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import type { Confidence, DiscoveredCategory, StackSource } from "@/types/projectspec";
+import type { Confidence, DiscoveredCategory, ProjectConstraints, StackSource } from "@/types/projectspec";
 
 interface WizardStackEntry {
   value: string;
@@ -19,6 +19,7 @@ export interface WizardState {
   avoid: string;
   designReferences: string;
   designReferenceImages: string[];
+  technicalConstraints?: ProjectConstraints;
   projectType?: string;
   classificationReason?: string;
   fullCategories?: DiscoveredCategory[];
@@ -34,6 +35,7 @@ const DEFAULT_STATE: WizardState = {
   avoid: "",
   designReferences: "",
   designReferenceImages: [],
+  technicalConstraints: undefined,
   projectType: "",
   classificationReason: "",
   fullCategories: [],
@@ -82,6 +84,7 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
             .filter((reference: string) => !reference.includes("res.cloudinary.com"))
             .join(", "),
           designReferenceImages: (spec.designReferences || []).filter((reference: string) => reference.includes("res.cloudinary.com")),
+          technicalConstraints: spec.constraints?.technical,
           projectType: spec.projectType || "",
           classificationReason: spec.classificationReason || "",
           fullCategories: [],

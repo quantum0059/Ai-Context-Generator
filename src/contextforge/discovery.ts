@@ -1,9 +1,16 @@
 import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../lib/claude";
-import { extractArchitecturalRequirements } from "./requirement-extractor";
+import { extractProjectConstraints } from "./constraint-extractor";
 import type { DraftInput } from "../types/projectspec";
 import { MODELS } from "../lib/ai-models";
 import { validateRegistryCoverage } from "./registry";
+import { cacheGet, cacheSet, stringHash } from "../lib/cache";
+import {
+  callGroqJsonWithKey,
+  estimateGroqRequestTokens,
+  groqKeyPool,
+  shouldUseGroqKeyPool,
+} from "./groq-key-pool";
 
 const discoverySchema = z.object({
   projectType: z.enum([
@@ -244,30 +251,73 @@ function offlineCodeAnalysisCategories(draft: DraftInput) {
  * technology categories are needed - categories are NOT hardcoded. The
  * heuristic fallback keeps the pipeline usable when no API key is configured.
  */
-export async function discoverCategories(
-  draft: DraftInput,
-): Promise<{
+const DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
+const inFlightDiscoveries = new Map<string, Promise<DiscoveryResult>>();
+
+type DiscoveryResult = {
   requiredCategories: string[];
   engine: "claude" | "heuristic";
   projectType?: string;
   classificationReason?: string;
   fullCategories?: any[];
-  architecturalRequirements?: any; // or import ArchitecturalRequirements type if not imported
-}> {
-  const architecturalRequirements = await extractArchitecturalRequirements(
-    draft.description,
-    draft.platform,
-    draft.projectName,
-  );
-  // Backward-compat: hard constraints still live at draft.constraints.technical
-  draft.constraints.technical = architecturalRequirements.constraints;
-  // Full requirements stored for downstream generators (agents.md, requirements.md)
-  draft.architecturalRequirements = architecturalRequirements;
-  console.log('[RequirementExtractor] Extracted', architecturalRequirements.functional.length, 'functional requirements,', architecturalRequirements.edgeCases.length, 'edge cases');
-  console.log('[ConstraintExtractor]', JSON.stringify(architecturalRequirements.constraints, null, 2));
+  technicalConstraints?: DraftInput["constraints"]["technical"];
+  architecturalRequirements?: any;
+};
 
-  if (isClaudeConfigured()) {
-    try {
+function discoveryCacheKey(draft: DraftInput): string {
+  return `discover:${stringHash(JSON.stringify({
+    projectName: draft.projectName,
+    description: draft.description,
+    platform: draft.platform,
+    features: [...draft.features].sort(),
+    constraints: draft.constraints,
+  }))}`;
+}
+
+export async function discoverCategories(
+  draft: DraftInput,
+): Promise<DiscoveryResult> {
+  const cacheKey = discoveryCacheKey(draft);
+  const cached = cacheGet<DiscoveryResult>(cacheKey);
+  if (cached) return cached;
+
+  const existing = inFlightDiscoveries.get(cacheKey);
+  if (existing) return existing;
+
+  const discoveryPromise = (async (): Promise<DiscoveryResult> => {
+    const extractedConstraints = await extractProjectConstraints(
+      draft.description,
+      draft.platform,
+    );
+    const technicalConstraints = {
+      ...extractedConstraints,
+      ...draft.constraints.technical,
+      forbiddenCategories: Array.from(new Set([
+        ...extractedConstraints.forbiddenCategories,
+        ...(draft.constraints.technical?.forbiddenCategories ?? []),
+      ])),
+      forbiddenTools: Array.from(new Set([
+        ...extractedConstraints.forbiddenTools,
+        ...(draft.constraints.technical?.forbiddenTools ?? []),
+      ])),
+      requiredToolTypes: Array.from(new Set([
+        ...extractedConstraints.requiredToolTypes,
+        ...(draft.constraints.technical?.requiredToolTypes ?? []),
+      ])),
+      rawConstraints: Array.from(new Set([
+        ...extractedConstraints.rawConstraints,
+        ...(draft.constraints.technical?.rawConstraints ?? []),
+      ])),
+      compliance: Array.from(new Set([
+        ...(extractedConstraints.compliance ?? []),
+        ...(draft.constraints.technical?.compliance ?? []),
+      ])),
+    };
+
+    console.log("[ConstraintExtractor]", JSON.stringify(technicalConstraints, null, 2));
+
+    if (isClaudeConfigured()) {
+      try {
         const discoverySystemPrompt = `You are a senior software architect analyzing a project description to determine its technical architecture requirements.
 
 Your job has TWO steps and you must complete them in order:
@@ -320,30 +370,16 @@ Custom category rules:
 - Set a human-readable label (e.g. 'AST Parser', 'ML Runtime', 'PDF Engine')
 - Include a reason explaining why this project specifically needs it
 - Set isCustom: true so the UI renders it correctly
-- Pre-populate suggestedTools with 2-3 real, installable npm package names or pip package names
+- suggestedTools applies only to custom categories; include 2-3 real, installable npm or pip packages when you add a custom category
 
-Your ENTIRE response must be a single JSON object matching this structure exactly:
-{
-  "projectType": "UI_APPLICATION | HEADLESS_ENGINE | BACKEND_API | CLI_TOOL | LIBRARY_OR_SDK | HYBRID",
-  "classificationReason": "one sentence explaining why this classification applies",
-  "requiredCategories": [
-    {
-      "key": "camelCase category key",
-      "label": "Human readable label",
-      "reason": "why this project needs this category",
-      "relevantToProjectType": true,
-      "isCustom": true,
-      "suggestedTools": [
-        { "name": "tool-name", "reason": "why", "installCommand": "npm install tool-name", "docsUrl": "https://..." }
-      ]
-    }
-  ],
-  "excludedCategories": [
-    { "key": "category that might seem relevant", "reason": "why this project does NOT need it" }
-  ]
-}
+Return one valid JSON object only.
 
-Return valid JSON only.`;
+Field contract:
+- projectType: one of UI_APPLICATION, HEADLESS_ENGINE, BACKEND_API, CLI_TOOL, LIBRARY_OR_SDK, HYBRID
+- classificationReason: one short sentence
+- requiredCategories: array of category objects with key, label, reason, relevantToProjectType, optional isCustom, and optional suggestedTools
+- relevantToProjectType must be a JSON boolean true or false, never a string like "true" or "false"
+- excludedCategories: optional array of objects with key and reason; use [] when there are no excluded categories`;
 
         const discoveryUserPrompt = `Analyze this project and determine its required technology categories:
 
@@ -353,11 +389,11 @@ Platform: ${draft.platform}
 Features mentioned: ${draft.features?.join(', ') || 'none yet'}
 
 Hard constraints already extracted:
-Forbidden tools: ${architecturalRequirements.constraints.forbiddenTools.join(', ')}
-Forbidden categories: ${architecturalRequirements.constraints.forbiddenCategories.join(', ')}
-Required tool types: ${architecturalRequirements.constraints.requiredToolTypes.join(', ')}
-Must be offline: ${architecturalRequirements.constraints.mustBeOffline}
-Must use local storage: ${architecturalRequirements.constraints.mustUseLocalStorage}
+Forbidden tools: ${technicalConstraints.forbiddenTools.join(', ')}
+Forbidden categories: ${technicalConstraints.forbiddenCategories.join(', ')}
+Required tool types: ${technicalConstraints.requiredToolTypes.join(', ')}
+Must be offline: ${technicalConstraints.mustBeOffline}
+Must use local storage: ${technicalConstraints.mustUseLocalStorage}
 
 Rules for this specific project:
 - Do NOT suggest any tool in the forbidden list
@@ -367,17 +403,32 @@ Rules for this specific project:
 - If mustUseLocalStorage is true, do not suggest any cloud database
 - After listing standard categories, scan for specialized technical needs that require a custom category (e.g. AST parsing → astParser, PDF generation → pdfEngine)`;
 
-        // REASONING model: category discovery is the most consequential step.
-        // A misclassification (e.g. HEADLESS_ENGINE tagged as UI_APPLICATION)
-        // silently corrupts every downstream suggestion. Use the strongest
-        // available model — throughput is irrelevant here, correctness is.
-        const result = await claudeJson(
-          discoverySystemPrompt,
-          discoveryUserPrompt,
-          discoverySchema,
-          0,
-          MODELS.REASONING,
-        );
+        // Keep discovery lean enough for public usage. This route should classify
+        // and extract categories, not consume the full architectural-analysis budget.
+        const maxTokens = 1500;
+        const result = shouldUseGroqKeyPool()
+          ? await groqKeyPool.callWithRotation(
+              MODELS.FAST,
+              estimateGroqRequestTokens(discoverySystemPrompt, discoveryUserPrompt, maxTokens),
+              (apiKey) =>
+                callGroqJsonWithKey({
+                  apiKey,
+                  systemPrompt: discoverySystemPrompt,
+                  userPrompt: discoveryUserPrompt,
+                  schema: discoverySchema,
+                  retries: 0,
+                  model: MODELS.FAST,
+                  maxTokens,
+                }),
+            )
+          : await claudeJson(
+              discoverySystemPrompt,
+              discoveryUserPrompt,
+              discoverySchema,
+              0,
+              MODELS.FAST,
+              maxTokens,
+            );
         
         console.log('[CategoryDiscovery]', result.projectType, '—', result.classificationReason);
         
@@ -387,57 +438,67 @@ Rules for this specific project:
           engine: "claude",
           projectType: result.projectType,
           classificationReason: result.classificationReason,
-          architecturalRequirements,
+          technicalConstraints,
         };
       } catch (err) {
         console.error("[DiscoverCategories Error]", err);
       }
-  }
-  const projectType = heuristicProjectType(draft);
+    }
+    const projectType = heuristicProjectType(draft);
 
-  // Offline code analysis tools (AST parsing, complexity, algorithms) get a
-  // purpose-built category set with custom tooling suggestions. This was
-  // previously only reachable via the AI path; now it's available in the
-  // heuristic fallback so offline-first projects get actionable categories
-  // even without an AI provider key.
-  //
-  // We require BOTH an AST/parsing signal AND at least one higher-level
-  // domain concern (complexity, algorithm, mentor, skill) to avoid false
-  // positives on simpler projects that merely mention "parses source code".
-  const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
-  const isOfflineCodeAnalysis =
-    projectType === "HEADLESS_ENGINE" &&
-    /\b(offline|no internet|without internet|local)\b/.test(text) &&
-    /\b(ast|parser?s?|source code)\b/.test(text) &&
-    /\b(complexity|algorithm|mentor|skill|recognition)\b/.test(text);
+    // Offline code analysis tools (AST parsing, complexity, algorithms) get a
+    // purpose-built category set with custom tooling suggestions. This was
+    // previously only reachable via the AI path; now it's available in the
+    // heuristic fallback so offline-first projects get actionable categories
+    // even without an AI provider key.
+    //
+    // We require BOTH an AST/parsing signal AND at least one higher-level
+    // domain concern (complexity, algorithm, mentor, skill) to avoid false
+    // positives on simpler projects that merely mention "parses source code".
+    const text = `${draft.description} ${draft.features.join(" ")}`.toLowerCase();
+    const isOfflineCodeAnalysis =
+      projectType === "HEADLESS_ENGINE" &&
+      /\b(offline|no internet|without internet|local)\b/.test(text) &&
+      /\b(ast|parser?s?|source code)\b/.test(text) &&
+      /\b(complexity|algorithm|mentor|skill|recognition)\b/.test(text);
 
-  if (isOfflineCodeAnalysis) {
-    const categories = offlineCodeAnalysisCategories(draft);
+    if (isOfflineCodeAnalysis) {
+      const categories = offlineCodeAnalysisCategories(draft);
+      return {
+        requiredCategories: categories.map((c) => c.key),
+        fullCategories: categories,
+        engine: "heuristic",
+        projectType,
+        classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} with offline code analysis specialization from the project description.`,
+        technicalConstraints,
+      };
+    }
+
+    const requiredCategories = heuristicCategories(draft, projectType);
+    // Even an unusual library needs at least one explicit technical concern.
+    if (requiredCategories.length === 0) requiredCategories.push("packageTooling");
     return {
-      requiredCategories: categories.map((c) => c.key),
-      fullCategories: categories,
+      requiredCategories,
+      fullCategories: requiredCategories.map((key) => ({
+        key,
+        label: CATEGORY_LABELS[key] ?? key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+        reason: `Required by the project description or selected features for this ${projectType.toLowerCase().replaceAll("_", " ")}`,
+        relevantToProjectType: true,
+        isCustom: !CATEGORY_LABELS[key],
+      })),
       engine: "heuristic",
       projectType,
-      classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} with offline code analysis specialization from the project description.`,
-      architecturalRequirements,
+      classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} from the project description and selected features.`,
+      technicalConstraints,
     };
-  }
+  })();
 
-  const requiredCategories = heuristicCategories(draft, projectType);
-  // Even an unusual library needs at least one explicit technical concern.
-  if (requiredCategories.length === 0) requiredCategories.push("packageTooling");
-  return {
-    requiredCategories,
-    fullCategories: requiredCategories.map((key) => ({
-      key,
-      label: CATEGORY_LABELS[key] ?? key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase()),
-      reason: `Required by the project description or selected features for this ${projectType.toLowerCase().replaceAll("_", " ")}`,
-      relevantToProjectType: true,
-      isCustom: !CATEGORY_LABELS[key],
-    })),
-    engine: "heuristic",
-    projectType,
-    classificationReason: `Classified as ${projectType.toLowerCase().replaceAll("_", " ")} from the project description and selected features.`,
-    architecturalRequirements,
-  };
+  inFlightDiscoveries.set(cacheKey, discoveryPromise);
+  try {
+    const result = await discoveryPromise;
+    cacheSet(cacheKey, result, DISCOVERY_CACHE_TTL_MS);
+    return result;
+  } finally {
+    inFlightDiscoveries.delete(cacheKey);
+  }
 }

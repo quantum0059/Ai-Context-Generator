@@ -3,6 +3,7 @@ import { assemblePackage } from "../../../../contextforge/assembler";
 import { projectSpecSchema } from "../../../../contextforge/spec";
 import { checkSubscriptionLimits } from "../../../../lib/subscription";
 import { checkRateLimit, getRateLimitIdentifier } from "../../../../lib/rateLimit";
+import { withCompression } from "../../../../lib/compression";
 
 /**
  * Generators run only against a finalized, validated ProjectSpec.
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
   }
   try {
     const { files, meta } = await assemblePackage(parsed.data);
-    return Response.json({ files, meta });
+    return withCompression({ files, meta }, req);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Package generation failed";
     return Response.json({ error: message }, { status: 500 });

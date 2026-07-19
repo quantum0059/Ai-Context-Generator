@@ -120,6 +120,8 @@ export default function FeaturesPage() {
   const [engine, setEngine] = useState<string>("");
 
   useEffect(() => {
+    const abortController = new AbortController();
+
     async function fetchFeatures() {
       if (!state.projectName || !state.description) {
         setLoading(false);
@@ -131,7 +133,6 @@ export default function FeaturesPage() {
 
         // Step 1: discover project type
         let currentProjectType = state.projectType;
-        let currentArchitecturalRequirements: any = undefined;
         const discoverRes = await fetch("/api/contextforge/discover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -141,6 +142,7 @@ export default function FeaturesPage() {
             platform,
             features: state.features,
           }),
+          signal: abortController.signal,
         });
         if (!discoverRes.ok) {
           const errData = await discoverRes.json().catch(() => ({}));
@@ -149,12 +151,11 @@ export default function FeaturesPage() {
           } else {
             setError(errData.error || "Failed to analyze project description.");
           }
-          setLoading(false);
+          if (!abortController.signal.aborted) setLoading(false);
           return;
         }
         const discoverData = await discoverRes.json();
         currentProjectType = discoverData.projectType || currentProjectType;
-        currentArchitecturalRequirements = discoverData.architecturalRequirements;
         const fullCategories = discoverData.fullCategories?.length
           ? discoverData.fullCategories
           : (discoverData.requiredCategories || []).map((key: string) => ({
@@ -165,7 +166,10 @@ export default function FeaturesPage() {
               reason: "Required based on the project description and selected features",
               relevantToProjectType: true,
             }));
+        if (abortController.signal.aborted) return;
+
         updateState({
+          technicalConstraints: discoverData.technicalConstraints,
           projectType: discoverData.projectType || "",
           classificationReason: discoverData.classificationReason || "",
           fullCategories,
@@ -181,23 +185,32 @@ export default function FeaturesPage() {
             platform,
             projectType: currentProjectType,
             existingFeatures: state.features,
-            functionalRequirements: currentArchitecturalRequirements?.functional ?? [],
           }),
+          signal: abortController.signal,
         });
         const data: FeatureSetResponse = await res.json();
         if (!res.ok) {
           throw new Error((data as any).error?.fieldErrors ?? "Failed to fetch suggestions");
         }
+        if (abortController.signal.aborted) return;
+
         setRichSet(data);
         setEngine(data.engine);
         setEngineWarning(data.engine === "heuristic" ? data.error ?? null : null);
       } catch (err) {
+        if ((err as Error).name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Something went wrong");
       } finally {
-        setLoading(false);
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
     fetchFeatures();
+
+    return () => {
+      abortController.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.projectName, state.description]);
 

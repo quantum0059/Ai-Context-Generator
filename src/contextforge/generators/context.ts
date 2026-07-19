@@ -179,14 +179,25 @@ function heuristicGlossary(spec: ProjectSpec): ContextData["domainGlossary"] {
     terms.push({ term: "Order", definition: "A confirmed purchase containing one or more line items. Orders progress through statuses: pending → processing → shipped → delivered." });
     terms.push({ term: "Cart", definition: "A temporary container for products a buyer intends to purchase. Carts expire if not checked out within a configured time window." });
   }
+  // ── Messaging / real-time communication ───────────────────────────────
+  if (/message|chat|channel|broadcast|inbox|conversation|dm|group chat|real.?time/.test(text)) {
+    terms.push({ term: "Channel", definition: "A named communication space where members can send and receive messages. Channels can be public (group chat) or admin-only (broadcast)." });
+    terms.push({ term: "Broadcast Channel", definition: "An admin-controlled channel where only administrators can post messages. Members receive messages but cannot reply, ensuring one-way announcements." });
+    terms.push({ term: "Private Message", definition: "A direct, one-to-one conversation between two users. Not visible to other members of the platform." });
+    terms.push({ term: "Group Chat", definition: "A multi-participant conversation where all members can send and read messages. Members can be added or removed by the group creator." });
+    terms.push({ term: "Message", definition: "The atomic unit of communication. A message has a sender, timestamp, content, and belongs to exactly one Channel or conversation." });
+    terms.push({ term: "Message History", definition: "The ordered log of past messages in a channel or conversation, paginated on load and persisted in the database." });
+  }
   // ── Social / community ────────────────────────────────────────────────
-  if (/post|feed|follow|like|comment|share|profile|social|community|forum/.test(text)) {
+  // Requires explicit social signals — 'profile' alone is too generic
+  if (/\b(post|feed|follow|like|share)\b.*(social|community|forum)|\b(social network|community platform|forum)\b/.test(text)) {
     terms.push({ term: "Post", definition: "A piece of user-generated content published to the feed. Posts can be liked, commented on, and shared." });
     terms.push({ term: "Feed", definition: "A personalised, chronologically or algorithmically ordered stream of posts from accounts the user follows." });
     terms.push({ term: "Follow", definition: "A directional relationship where User A subscribes to User B's posts. Following is unidirectional — B does not automatically follow back." });
   }
   // ── Media / streaming ─────────────────────────────────────────────────
-  if (/video|audio|podcast|stream|playlist|episode|media|player|watch|listen/.test(text)) {
+  // Requires strong streaming-specific signals, NOT generic 'media' or 'video' which appear in messaging apps
+  if (/\b(podcast|episode|playlist|watch history|media player|livestream|vod|streaming platform)\b/.test(text)) {
     terms.push({ term: "Episode", definition: "A single playable media unit within a series or podcast. Episodes have a duration, transcript, and play position saved per user." });
     terms.push({ term: "Playlist", definition: "A user-curated or system-generated ordered list of episodes or tracks." });
     terms.push({ term: "Watch History", definition: "The record of which episodes a user has started or completed, including the last playback position for resumption." });
@@ -281,11 +292,21 @@ function heuristicUxPrinciples(spec: ProjectSpec): string[] {
 
 function heuristicOutOfScope(spec: ProjectSpec): string[] {
   const text = `${spec.description} ${spec.features.join(" ")}`.toLowerCase();
+  const platformLow = spec.platform.toLowerCase();
+
   const outOfScope: string[] = [
-    "Native mobile apps are out of scope unless the platform is explicitly mobile",
     "Internationalisation (i18n) and multi-language support are out of scope for the initial version",
     "Offline mode is out of scope unless explicitly required by the project constraints",
   ];
+
+  // Only add the mobile out-of-scope statement if the project is NOT a mobile or React Native project.
+  // Adding it for mobile projects directly contradicts the spec and causes AI agents to skip RN code.
+  const isMobileProject =
+    /mobile|ios|android|react.?native|expo/.test(platformLow) ||
+    /react.?native|expo|mobile app|ios app|android app/.test(text);
+  if (!isMobileProject) {
+    outOfScope.push("Native mobile apps are out of scope unless the platform is explicitly mobile");
+  }
 
   if (!/payment|billing|stripe/.test(text)) {
     outOfScope.push("In-app payments and billing management are out of scope");
