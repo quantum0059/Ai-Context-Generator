@@ -3,14 +3,17 @@ import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { registryFor, registryByName } from "../registry";
 import type { PackageFiles, ProjectSpec, StackEntry } from "../../types/projectspec";
 import { buildConstraintBlock, buildTechCodeSnippets, decisionFileName, lockedEntries } from "./shared";
+import { buildEcosystemContext, resolveEcosystemProfile } from "./ecosystem";
 import { MODELS } from "../../lib/ai-models";
 
-/** One ADR per locked category (Section 6). Prevents AI from changing architecture later. */
 export async function generateDecisions(spec: ProjectSpec, sharedContext: string = ''): Promise<PackageFiles> {
+  const profile = resolveEcosystemProfile(spec);
+  const ecosystemContext = buildEcosystemContext(spec);
   const files: PackageFiles = {};
   const entries = lockedEntries(spec);
 
-  const systemPrompt = `${buildConstraintBlock(spec)}You are a senior architect writing an Architecture Decision Record that will be read by AI coding assistants. The ADR must prevent the AI from ever suggesting alternatives to this decision or implementing it incorrectly.
+  const systemPrompt = `${ecosystemContext}
+${buildConstraintBlock(spec)}You are a senior architect writing an Architecture Decision Record that will be read by AI coding assistants. The ADR must prevent the AI from ever suggesting alternatives to this decision or implementing it incorrectly.
 
 Be extremely specific. Include real code. Every statement must apply to this project specifically, not software development in general.
 ${sharedContext}`;
@@ -47,7 +50,7 @@ The precise way this technology is used in ${spec.projectName}. Include:
 - The exact initialization/setup pattern
 - A complete real usage example (not a toy example — something that would actually appear in this project)
 
-\`\`\`typescript
+\`\`\`${profile.codeFenceTag}
 [complete working code example]
 \`\`\`
 
@@ -100,6 +103,7 @@ Example: 'All database rows owned by a user must have user_id text referencing t
 }
 
 function fallbackDecision(spec: ProjectSpec, category: string, entry: StackEntry & { value: string }): string {
+  const profile = resolveEcosystemProfile(spec);
   const chosen = entry.value;
   const reg = registryByName(chosen);
   const alternatives = registryFor(category).filter(
@@ -115,7 +119,7 @@ function fallbackDecision(spec: ProjectSpec, category: string, entry: StackEntry
   );
   const toolSnippet = snippetMatch
     ? snippetMatch[1]
-    : `\`\`\`typescript\n// Install: ${reg?.installCommands.join(' && ') ?? `npm install ${chosen.toLowerCase()}`}\n// Initialize ${chosen} and import it only in src/services/ or src/lib/\n// See official docs: ${reg?.docsUrl ?? 'https://www.npmjs.com/package/' + chosen.toLowerCase()}\n\`\`\``;
+    : `\`\`\`${profile.codeFenceTag}\n// Install: ${reg?.installCommands.join(' && ') ?? `${profile.installCommand} ${chosen.toLowerCase()}`}\n// Initialize ${chosen} and import it only in ${profile.sourceDir}/services/ or ${profile.sourceDir}/lib/\n// See official docs: ${reg?.docsUrl ?? 'https://www.npmjs.com/package/' + chosen.toLowerCase()}\n\`\`\``;
 
   // AI-specific rules per tool
   const aiRules = getAiRulesForTool(chosen, category, spec);

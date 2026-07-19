@@ -2,6 +2,7 @@ import { claudeText, isClaudeConfigured } from "../../lib/claude";
 import type { ProjectSpec } from "../../types/projectspec";
 import { MODELS } from "../../lib/ai-models";
 import { buildConstraintBlock, buildTechCodeSnippets, buildSharedDatabaseSchema, derivedEntitiesFromFeatures, lockedEntries, slugify } from "./shared";
+import { buildEcosystemContext, resolveEcosystemProfile } from "./ecosystem";
 import type { Aspect } from "./prompt-detector";
 import { isPromptContentValid } from "./prompt-validator";
 
@@ -110,6 +111,10 @@ export function getAspectDeliverables(
 ): { description: string; files: string[] } {
   const slug = slugify(feature);
   const platform = spec.platform.toLowerCase();
+  const profile = resolveEcosystemProfile(spec);
+  const src = profile.sourceDir;
+  const ext = profile.sourceExtension;
+  
   const isMobile = /mobile|ios|android|react.?native|expo/.test(platform);
   const isWeb = /web|saas|browser|extension/.test(platform);
   // Next.js paths are ONLY valid on a web/saas platform. On mobile we never
@@ -122,15 +127,15 @@ export function getAspectDeliverables(
   );
 
   if (/ui|component|frontend|client/.test(aspectKey)) {
-    const cmp = `src/components/${slug}/${feature.replace(/\s+/g, '')}`;
+    const cmp = `${src}/components/${slug}/${feature.replace(/\s+/g, '')}`;
     let files: string[];
     if (isMobile) {
       // Expo Router screen + presentational components.
-      files = [`app/${slug}.tsx`, `${cmp}Screen.tsx`, `src/components/${slug}/index.ts`];
+      files = [`app/${slug}.tsx`, `${cmp}Screen.tsx`, `${src}/components/${slug}/index.ts`];
     } else if (isNextjs) {
-      files = [`src/app/${slug}/page.tsx`, `${cmp}Client.tsx`, `src/components/${slug}/index.ts`];
+      files = [`${src}/app/${slug}/page.tsx`, `${cmp}Client.tsx`, `${src}/components/${slug}/index.ts`];
     } else {
-      files = [`src/pages/${slug}.tsx`, `src/components/${slug}/index.tsx`];
+      files = [`${src}/pages/${slug}.tsx`, `${src}/components/${slug}/index.tsx`];
     }
     return {
       description: `Build the complete **${feature}** user interface for ${spec.projectName}. This includes the ${isMobile ? 'screen' : 'page'} component, all child components, loading/error/empty states, and navigation integration. All external data must arrive via props or hooks — no SDK imports in this layer.`,
@@ -139,13 +144,13 @@ export function getAspectDeliverables(
   }
   if (/api|backend|route|server|endpoint/.test(aspectKey)) {
     const routeFile = isNextjs
-      ? `src/app/api/${slug}/route.ts`
+      ? `${src}/app/api/${slug}/route${ext}`
       : isExpress
-      ? `src/routes/${slug}.ts`
-      : `src/api/${slug}.ts`;
+      ? `${src}/routes/${slug}${ext}`
+      : profile.modulePath(`${slug}Route`);
     return {
       description: `Build the **${feature}** backend layer for ${spec.projectName}. This includes API routes, input validation with Zod, the service module that encapsulates all SDK/DB calls, and typed domain types. No SDK imports in route files — all DB/SDK access goes through the service module.`,
-      files: [routeFile, `src/services/${slug}.ts`, `src/types/${slug}.ts`],
+      files: [routeFile, profile.modulePath(`${slug}Service`), profile.modulePath(`${slug}Types`)],
     };
   }
   if (/database|schema|migration/.test(aspectKey)) {
@@ -167,7 +172,7 @@ export function getAspectDeliverables(
       : '';
     return {
       description: `Define the **${feature}** database schema for ${spec.projectName}. This includes table definitions, indexes,${securityNote} and migration files.${tableList}`,
-      files: [`src/lib/schema/${slug}.sql`, `src/lib/migrations/001_${slug}.sql`],
+      files: [`${profile.sourceDir}/schema/${slug}.sql`, `${profile.sourceDir}/migrations/001_${slug}.sql`],
     };
   }
   if (/state|store/.test(aspectKey)) {
@@ -181,27 +186,28 @@ export function getAspectDeliverables(
       description: `Integrate authentication for the **${feature}** feature in ${spec.projectName}. This includes route protection, session propagation, and user-scoped data access.`,
       files: isNextjs
         ? ['src/middleware.ts', `src/app/api/${slug}/route.ts`]
-        : ['src/middleware/auth.ts'],
+        : [profile.modulePath(`middleware/auth`)],
     };
   }
   if (/test/.test(aspectKey)) {
     return {
       description: `Write comprehensive tests for the **${feature}** feature in ${spec.projectName}. Cover happy paths, failure paths, and edge cases for all public service functions.`,
-      files: [`src/__tests__/${slug}.test.ts`],
+      files: [profile.testPath(slug)],
     };
   }
   // Generic fallback
   return {
     description: `Implement the **${aspectKey}** concern for the **${feature}** feature in ${spec.projectName}.`,
-    files: [`src/features/${slug}/${aspectKey}.ts`],
+    files: [profile.modulePath(`features/${slug}/${aspectKey}`)],
   };
 }
 
 export function getAspectAcceptanceCriteria(aspectKey: string, feature: string, spec: ProjectSpec): string[] {
+  const profile = resolveEcosystemProfile(spec);
   const base = [
     `All code uses only the locked stack (${lockedEntries(spec).map(([, e]) => e.value).join(', ')})`,
     `No technology outside the locked stack is imported`,
-    `TypeScript strict mode passes — no implicit \`any\``,
+    `${profile.displayName} strict types pass — no implicit un-typed variables`,
   ];
   if (/ui|component|frontend/.test(aspectKey)) {
     // Domain-specific criteria appended based on what the feature actually is
@@ -408,6 +414,7 @@ export function richFallbackPrompt(
   aspect: Aspect,
   priorFeatures: string[],
 ): string {
+  const profile = resolveEcosystemProfile(spec);
   const deliverables = getAspectDeliverables(aspect.aspect, feature, spec);
   const criteria = getAspectAcceptanceCriteria(aspect.aspect, feature, spec);
   const antiPatterns = getAspectAntiPatterns(aspect.aspect, spec);
@@ -479,7 +486,7 @@ ${deliverables.files.join('\n')}
 For each file:
 - Export named exports (never default exports for services/hooks)
 - Add a \`// @description\` comment at the top explaining its purpose
-- Use TypeScript strict mode — no \`any\`, no non-null assertions without a guard
+- Use strict typing according to ${profile.displayName} best practices — no dynamically typed hacks
 
 ---
 ${snippets}
@@ -529,7 +536,7 @@ After implementing, verify your own output by answering each question. If any an
 
 Implement these tests and ensure they pass. Add one test per listed edge case.
 
-\`\`\`typescript
+\`\`\`${profile.codeFenceTag}
 ${testCode}
 \`\`\`
 `;
@@ -543,16 +550,19 @@ export async function generateAspectPrompt(
   sharedContext: string = '',
 ): Promise<string> {
   if (isClaudeConfigured()) {
+    const profile = resolveEcosystemProfile(spec);
+    const ecosystemContext = buildEcosystemContext(spec);
     const constraintBlock = buildConstraintBlock(spec);
     const snippets = buildTechCodeSnippets(spec);
     const schema = buildSharedDatabaseSchema(spec);
     const requirementContext = buildFeatureRequirementContext(spec, feature);
 
-    const systemPrompt = `${constraintBlock}You are a Principal Engineer writing an implementation brief for an AI coding assistant. The assistant will read ONLY this file before implementing this aspect — it has no other context. Your brief must be so precise, complete, and unambiguous that a correct implementation is the ONLY reasonable output. Leave no decision to guesswork.
+    const systemPrompt = `${ecosystemContext}
+${constraintBlock}You are a Principal Engineer writing an implementation brief for an AI coding assistant. The assistant will read ONLY this file before implementing this aspect — it has no other context. Your brief must be so precise, complete, and unambiguous that a correct implementation is the ONLY reasonable output. Leave no decision to guesswork.
 
 Rules:
-- Include exact file paths to create or modify (every path starts with src/)
-- Include the complete TypeScript interface/type definitions the AI must use
+- Include exact file paths to create or modify (every path starts with ${profile.sourceDir}/)
+- Include the complete ${profile.displayName} interface/type definitions the AI must use
 - Include the exact function signatures to implement, with explicit return types
 - Include real example code for the most complex part — no pseudo-code, no placeholders
 - Every edge case provided in the requirement context MUST appear with explicit expected handling AND a matching test
@@ -599,13 +609,13 @@ List features that must already be built: ${priorFeatures.join(', ') || 'None'}
 One paragraph describing exactly what this aspect produces and how it fits into the larger feature.
 
 ## Required File Structure
-For each file include an exact path beginning with src/, its purpose, exports, and complete TypeScript interfaces and function signatures.
+For each file include an exact path beginning with ${profile.sourceDir}/, its purpose, exports, and complete ${profile.displayName} interfaces and function signatures.
 
 ## Files to Modify
-For each existing file include an exact path beginning with src/ and the exact change.
+For each existing file include an exact path beginning with ${profile.sourceDir}/ and the exact change.
 
 ## Implementation Notes
-Include one real TypeScript code snippet showing the correct pattern.
+Include one real ${profile.displayName} code snippet showing the correct pattern.
 
 ## What NOT To Do
 List specific anti-patterns for this exact stack.
@@ -630,7 +640,7 @@ Include real test code without placeholder assertions, with one test per edge ca
     }
 
     try {
-      const retrySystemPrompt = `${systemPrompt}\n\nYou MUST include: (1) real file paths starting with src/, (2) TypeScript interfaces, (3) at least 3 acceptance criteria checkboxes. Do not write placeholder code.`;
+      const retrySystemPrompt = `${systemPrompt}\n\nYou MUST include: (1) real file paths starting with ${profile.sourceDir}/, (2) ${profile.displayName} interfaces, (3) at least 3 acceptance criteria checkboxes. Do not write placeholder code.`;
       const content = await claudeText(retrySystemPrompt, userPrompt, 0, MODELS.CONTENT_FALLBACK);
       if (isPromptContentValid(content, feature, aspect.aspect)) return content;
     } catch {

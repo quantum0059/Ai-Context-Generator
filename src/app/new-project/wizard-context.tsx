@@ -23,6 +23,7 @@ export interface WizardState {
   projectType?: string;
   classificationReason?: string;
   fullCategories?: DiscoveredCategory[];
+  architecturalRequirements?: any;
 }
 
 const DEFAULT_STATE: WizardState = {
@@ -88,6 +89,7 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
           projectType: spec.projectType || "",
           classificationReason: spec.classificationReason || "",
           fullCategories: [],
+          architecturalRequirements: spec.architecturalRequirements,
         };
         setState(templateState);
         sessionStorage.removeItem("contextforge_template_spec");

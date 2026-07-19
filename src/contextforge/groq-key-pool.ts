@@ -60,13 +60,29 @@ export class GroqKeyPool {
     model: AiModel,
     estimatedTokens: number,
     fn: (apiKey: string) => Promise<{ value: T; tokensUsed?: number }>,
+    maxWaitMs = 120_000
   ): Promise<T> {
     const attempted = new Set<string>();
     let lastError: unknown;
+    const startTime = Date.now();
 
-    while (attempted.size < this.keys.length) {
+    while (true) {
       const nextKey = this.rankKeys(model, estimatedTokens, attempted)[0];
-      if (!nextKey) break;
+
+      if (!nextKey) {
+        const soonest = this.getWaitTimeForNextKey(model, estimatedTokens, Date.now());
+        if (!soonest) break; // Impossible to fulfill
+
+        const waitMs = Math.max(1000, soonest.waitMs);
+        if (Date.now() + waitMs - startTime > maxWaitMs) {
+          break; // Wait would exceed our max budget
+        }
+
+        console.log(`[GroqKeyPool] Saturated for ${model}. Waiting ${waitMs}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        attempted.clear();
+        continue;
+      }
 
       attempted.add(nextKey);
 
@@ -83,10 +99,19 @@ export class GroqKeyPool {
           const retryAfterMs = error.retryAfterMs ?? this.windowMs;
           this.markSaturated(nextKey, model, retryAfterMs, "429 rate limit");
           const fallbackKey = this.rankKeys(model, estimatedTokens, attempted)[0];
+
           if (fallbackKey) {
             console.log(
               `[GroqKeyPool] 429 on key ${this.maskKey(nextKey)} for ${model}; rotating to ${this.maskKey(fallbackKey)}`,
             );
+            continue;
+          }
+
+          const waitMs = Math.max(1000, retryAfterMs);
+          if (Date.now() + waitMs - startTime <= maxWaitMs) {
+            console.log(`[GroqKeyPool] 429 on key ${this.maskKey(nextKey)} for ${model} and no fallback available. Waiting ${waitMs}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            attempted.clear();
             continue;
           }
         }
@@ -97,6 +122,42 @@ export class GroqKeyPool {
 
     if (lastError instanceof Error) throw lastError;
     throw new Error(`All Groq API keys are saturated for model ${model}.`);
+  }
+
+  private getWaitTimeForNextKey(model: AiModel, estimatedTokens: number, now: number): { key: string; waitMs: number } | null {
+    let bestKey: string | null = null;
+    let minWait = Infinity;
+
+    for (const key of this.keys) {
+      const state = this.saturated.get(this.usageKey(key, model));
+      let waitMs = 0;
+
+      if (state && state.until > now) {
+        waitMs = state.until - now;
+      } else {
+        const currentHeadroom = this.headroom(key, model, now);
+        if (currentHeadroom >= estimatedTokens) {
+          return { key, waitMs: 0 };
+        }
+        const usageKeyStr = this.usageKey(key, model);
+        const entries = this.usage.get(usageKeyStr) ?? [];
+
+        if (entries.length > 0) {
+          const oldest = entries[0];
+          waitMs = Math.max(0, (oldest.timestamp + this.windowMs) - now);
+        } else {
+          continue; // Impossible to satisfy with this key even when empty
+        }
+      }
+
+      if (waitMs > 0 && waitMs < minWait) {
+        minWait = waitMs;
+        bestKey = key;
+      }
+    }
+
+    if (!bestKey || minWait === Infinity) return null;
+    return { key: bestKey, waitMs: minWait };
   }
 
   private rankKeys(
@@ -285,6 +346,12 @@ export async function callGroqJsonWithKey<T>({
         lastError = error;
         if (error instanceof GroqApiError && error.status === 429) {
           throw error;
+        }
+        if (error instanceof Error && (error.message.includes("Schema validation failed") || error.message.includes("No JSON found"))) {
+          if (jsonAttempt < JSON_VALIDATION_RETRIES) {
+            console.log(`[GroqJSON] Validation failed, retrying (${jsonAttempt + 1}/${JSON_VALIDATION_RETRIES}): ${error.message}`);
+            continue;
+          }
         }
         break;
       }

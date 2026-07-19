@@ -4,6 +4,12 @@ import { claudeJson, isClaudeConfigured } from "../lib/claude";
 import type { DraftInput, SuggestionCandidate, SuggestionResolution } from "../types/projectspec";
 import { registryFor } from "./registry";
 import { MODELS } from "../lib/ai-models";
+import {
+  callGroqJsonWithKey,
+  estimateGroqRequestTokens,
+  groqKeyPool,
+  shouldUseGroqKeyPool,
+} from "./groq-key-pool";
 
 const SUGGESTION_TTL_MS = 6 * 60 * 60 * 1000; // several hours
 
@@ -697,15 +703,34 @@ export async function suggestForCategory(
         `- If the project must be offline, only suggest tools that run locally without internet access.\n` +
         `Return JSON: {"candidates":[{"name":"...","rationale":"...","docsUrl":"...","confidence":"high|low"}]}`;
 
-      const r = await claudeJson(
-        "You are a Principal Engineer recommending software tools. " +
+      const systemPrompt = "You are a Principal Engineer recommending software tools. " +
           "Only suggest real, verifiable packages. Accuracy matters more than completeness — " +
-          "if you are unsure a package exists, set confidence to 'low'. Return JSON only.",
-        prompt,
-        tier2Schema,
-        2,
-        MODELS.FAST,
-      );
+          "if you are unsure a package exists, set confidence to 'low'. Return JSON only.";
+      const maxTokens = 1500;
+      
+      const r = shouldUseGroqKeyPool()
+        ? await groqKeyPool.callWithRotation(
+            MODELS.FAST,
+            estimateGroqRequestTokens(systemPrompt, prompt, maxTokens),
+            (apiKey) =>
+              callGroqJsonWithKey({
+                apiKey,
+                systemPrompt,
+                userPrompt: prompt,
+                schema: tier2Schema,
+                retries: 2,
+                model: MODELS.FAST,
+                maxTokens,
+              })
+          )
+        : await claudeJson(
+            systemPrompt,
+            prompt,
+            tier2Schema,
+            2,
+            MODELS.FAST,
+            maxTokens
+          );
 
       let candidates: SuggestionCandidate[] = r.candidates.map((c) => {
         const entry = eligibleTools.find((e) => e.name.toLowerCase() === c.name.toLowerCase());

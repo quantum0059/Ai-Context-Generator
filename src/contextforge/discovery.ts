@@ -366,11 +366,16 @@ CRITICAL RULES:
 
 Custom category rules:
 - Create one category per distinct technical concern
-- Name the category key in camelCase (e.g. 'astParser', 'mlRuntime', 'pdfEngine', 'imageProcessor', 'cliFramework', 'testRunner')
+- Map the required tool types to standard categories if they fit (e.g. "React Native" -> frontendFramework, "PostgreSQL" -> database, "JWT" -> authentication)
+- If a tool type does not fit any standard category, create a custom category
+- Name the custom category key in camelCase (e.g. 'astParser', 'mlRuntime', 'pdfEngine', 'imageProcessor', 'cliFramework', 'testRunner')
 - Set a human-readable label (e.g. 'AST Parser', 'ML Runtime', 'PDF Engine')
 - Include a reason explaining why this project specifically needs it
 - Set isCustom: true so the UI renders it correctly
 - suggestedTools applies only to custom categories; include 2-3 real, installable npm or pip packages when you add a custom category
+
+STANDARD CATEGORIES:
+- frontendFramework, backendFramework, cliFramework, styling, stateManagement, database, authentication, hosting, aiProvider, videoProvider, payments, email, storage, analytics, monitoring, walletProvider, mapsProvider, searchProvider
 
 Return one valid JSON object only.
 

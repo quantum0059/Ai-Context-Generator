@@ -24,6 +24,7 @@ interface FeatureSetResponse {
   features: string[];
   engine: "ai" | "heuristic";
   error?: string;
+  architecturalRequirements?: any;
 }
 
 // ─── Priority badge helpers ───────────────────────────────────────────────────
@@ -197,6 +198,9 @@ export default function FeaturesPage() {
         setRichSet(data);
         setEngine(data.engine);
         setEngineWarning(data.engine === "heuristic" ? data.error ?? null : null);
+        if (data.architecturalRequirements) {
+          updateState({ architecturalRequirements: data.architecturalRequirements });
+        }
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Something went wrong");

@@ -3,6 +3,7 @@ import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import { MODELS } from "../../lib/ai-models";
 import type { ProjectSpec, ArchitecturalRequirements } from "../../types/projectspec";
 import { buildConstraintBlock, buildTechCodeSnippets, buildSharedDatabaseSchema, decisionFileName, lockedEntries, lowConfidenceEntries, slugify } from "./shared";
+import { buildEcosystemContext, resolveEcosystemProfile } from "./ecosystem";
 
 /** Formats ArchitecturalRequirements into a compact context block for AI prompts */
 function buildRequirementsBlock(req: ArchitecturalRequirements): string {
@@ -67,6 +68,8 @@ ${edges}
 
 /** agents.md - the AI constitution (Section 7), generated solely from the finalized ProjectSpec. */
 export async function generateAgents(spec: ProjectSpec): Promise<string> {
+  const profile = resolveEcosystemProfile(spec);
+  const ecosystemContext = buildEcosystemContext(spec);
   const locked = lockedEntries(spec);
   const stackSummary = locked.map(([category, entry]) => `- ${category}: ${entry.value}`).join("\n");
 
@@ -74,11 +77,12 @@ export async function generateAgents(spec: ProjectSpec): Promise<string> {
   const req = spec.architecturalRequirements as ArchitecturalRequirements | undefined;
   const requirementsBlock = req ? buildRequirementsBlock(req) : "";
 
-  const systemPrompt = `${constraintBlock}You are an expert software architect writing an AI development constitution for a specific project. This document will be fed to AI coding assistants (Claude, Cursor, ChatGPT, Copilot) as their primary instruction file. It must be so specific that an AI reading it produces architecturally correct code on the first attempt without any additional explanation from the developer.
+  const systemPrompt = `${ecosystemContext}
+${constraintBlock}You are an expert software architect writing an AI development constitution for a specific project. This document will be fed to AI coding assistants (Claude, Cursor, ChatGPT, Copilot) as their primary instruction file. It must be so specific that an AI reading it produces architecturally correct code on the first attempt without any additional explanation from the developer.
 
 Rules for what you write:
 - Every rule must reference the exact technology chosen for this project by name
-- Include exact code patterns (real TypeScript/code snippets) not descriptions of patterns
+- Include exact code patterns (real ${profile.displayName} code snippets) not descriptions of patterns
 - Include a 'What NOT to do' section with specific anti-patterns for this exact stack
 - Include exact file naming conventions with examples
 - Include the exact error handling contract this project uses with a code snippet
@@ -114,26 +118,26 @@ Example format for each rule:
 ### [Technology Name]
 Rule: [one sentence stating the rule]
 Correct pattern:
-\`\`\`typescript
+\`\`\`${profile.codeFenceTag}
 [actual code snippet]
 \`\`\`
 Never do this:
-\`\`\`typescript
+\`\`\`${profile.codeFenceTag}
 [anti-pattern code snippet]
 \`\`\`
 
 ## File & Folder Conventions
 - File naming: exact convention with 3 examples each
-- Folder structure: show the exact src/ tree for this project's platform and framework
+- Folder structure: show the exact ${profile.sourceDir}/ tree for this project's platform and framework
 - Co-location rules: where tests, types, and styles live
 
 ## Error Handling Contract
-The exact error response shape this project returns, with a TypeScript interface definition and a real example of a route using it correctly.
+The exact error response shape this project returns, with a ${profile.displayName} interface/struct definition and a real example of a route using it correctly.
 
 ## What You Are NOT Allowed To Do
 A numbered list of 8-12 specific prohibitions, each referencing a specific technology or pattern by name. Examples of what these should look like:
 - 'Do not call Supabase directly from React components — all DB access goes through src/lib/db/*.repository.ts'
-- 'Do not use any type — every function must have explicit TypeScript types'
+- 'Do not use dynamically typed variables — every function must have explicit types'
 - 'Do not create API routes outside src/app/api/'
 
 ## Load Order for AI Sessions
@@ -168,6 +172,8 @@ List any stack choices marked confidence: 'low' and tell the AI to verify their 
 }
 
 function fallbackAgents(spec: ProjectSpec): string {
+  const profile = resolveEcosystemProfile(spec);
+  const ecosystemContext = buildEcosystemContext(spec);
   const locked = lockedEntries(spec);
   const lowConf = lowConfidenceEntries(spec);
   const snippets = buildTechCodeSnippets(spec);
@@ -252,12 +258,11 @@ function fallbackAgents(spec: ProjectSpec): string {
 - ❌ NO \`<div>\`/\`<span>\`/HTML elements — use React Native \`<View>\`/\`<Text>\` primitives
 - ❌ NO Next.js imports (\`next/navigation\`, \`next/server\`) — use Expo Router`;
   } else if (isCliOrHeadless) {
-    fileConventions = `- **Commands:** \`src/commands/<command>.ts\` — one file per CLI command, kebab-case
-- **Core logic:** \`src/core/<module>.ts\` — pure business logic, no I/O
-- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
-- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
-- **Tests:** \`tests/<module>.test.ts\` — test every public function
-- ❌ NO React, DOM, or browser APIs — this is a Node.js / CLI project`;
+    fileConventions = `- **Commands:** \`${profile.sourceDir}/commands/<command>${profile.sourceExtension}\` — one file per CLI command, kebab-case
+- **Core logic:** \`${profile.sourceDir}/core/<module>${profile.sourceExtension}\` — pure business logic, no I/O
+- **Services:** \`${profile.sourceDir}/services/<domain>${profile.sourceExtension}\` — the ONLY files that import external SDKs
+- **Types:** \`${profile.sourceDir}/types/<domain>${profile.sourceExtension}\` — shared domain interfaces
+- **Tests:** \`${profile.testDir}/<module>${profile.testExtension}\` — test every public function`;
   } else if (isNextjs) {
     fileConventions = `- **Pages:** \`src/app/<route>/page.tsx\` — Next.js App Router, Server Component by default
 - **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, one component per file
@@ -267,14 +272,15 @@ function fallbackAgents(spec: ProjectSpec): string {
 - **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
 - **Tests:** \`src/__tests__/<module>.test.ts\` or co-located \`__tests__/\``;
   } else {
-    fileConventions = `- **Pages:** \`src/pages/<route>.tsx\`
-- **Components:** \`src/components/<domain>/<ComponentName>.tsx\` — PascalCase, one component per file
-- **Services:** \`src/services/<domain>.ts\` — the ONLY files that import external SDKs
-- **Types:** \`src/types/<domain>.ts\` — shared domain interfaces
-- **Tests:** \`src/__tests__/<module>.test.ts\``;
+    fileConventions = `- **Pages:** \`${profile.sourceDir}/pages/<route>${profile.sourceExtension}\`
+- **Components:** \`${profile.sourceDir}/components/<domain>/<ComponentName>${profile.sourceExtension}\` — PascalCase, one component per file
+- **Services:** \`${profile.sourceDir}/services/<domain>${profile.sourceExtension}\` — the ONLY files that import external SDKs
+- **Types:** \`${profile.sourceDir}/types/<domain>${profile.sourceExtension}\` — shared domain interfaces
+- **Tests:** \`${profile.testDir}/<module>${profile.testExtension}\``;
   }
 
   return `# ${spec.projectName} — AI Development Constitution
+${ecosystemContext}
 ${constraintBlock}
 
 ## Project Overview
@@ -314,21 +320,12 @@ ${fileConventions}
 
 Every API response from this project uses this exact shape. Never invent a different error format.
 
-\`\`\`typescript
-// src/types/errors.ts
-export interface ApiErrorResponse {
-  error: string;          // human-readable message
-  code?: string;          // machine-readable code e.g. 'UNAUTHORIZED', 'VALIDATION_FAILED'
-  details?: unknown;      // ZodError.flatten() for validation errors, undefined otherwise
-}
-
-// Usage in a route handler:
-if (!userId) {
-  return Response.json(
-    { error: 'Unauthorized', code: 'UNAUTHORIZED' } satisfies ApiErrorResponse,
-    { status: 401 }
-  );
-}
+\`\`\`${profile.codeFenceTag}
+// Error response pattern
+// Use ${profile.displayName} idioms to return a structured error with:
+// - error: string (human-readable message)
+// - code: string (machine-readable code e.g. 'UNAUTHORIZED')
+// - details: any validation specifics
 \`\`\`
 
 Happy-path responses return the resource directly (not wrapped in \`{ data: ... }\`).

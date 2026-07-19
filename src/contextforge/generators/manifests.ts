@@ -2,6 +2,7 @@ import { z } from "zod";
 import { claudeJson, isClaudeConfigured } from "../../lib/claude";
 import type { PackageFiles, ProjectSpec } from "../../types/projectspec";
 import { buildConstraintBlock, decisionFileName, lockedEntries, relevantCategoriesForFeature, slugify } from "./shared";
+import { buildEcosystemContext, resolveEcosystemProfile } from "./ecosystem";
 import { registryByName } from "../registry";
 import { MODELS } from "../../lib/ai-models";
 
@@ -54,7 +55,11 @@ async function generateFeatureManifest(
   featureIdx: number,
   uniqueContext: string[],
 ): Promise<Manifest | null> {
-  const systemPrompt = `${buildConstraintBlock(spec)}You are a technical project manager generating a machine-readable task definition for an AI coding agent. The agent will read this JSON file and know exactly what to build, what files to create, what to test, and what done looks like — with zero human input required.
+  const ecosystemContext = buildEcosystemContext(spec);
+  const constraintBlock = buildConstraintBlock(spec);
+  
+  const systemPrompt = `${ecosystemContext}
+${constraintBlock}You are a technical project manager generating a machine-readable task definition for an AI coding agent. The agent will read this JSON file and know exactly what to build, what files to create, what to test, and what done looks like — with zero human input required.
 
 Return valid JSON only, no markdown, no code fences.`;
 
@@ -258,6 +263,7 @@ function buildFallbackManifest(
   featureIdx: number,
   requiredContext: string[],
 ): Record<string, unknown> {
+  const profile = resolveEcosystemProfile(spec);
   const slug = slugify(feature);
   const relevant = relevantCategoriesForFeature(spec, feature);
   const locked = lockedEntries(spec);
@@ -271,27 +277,27 @@ function buildFallbackManifest(
   const filesToCreate: string[] = isMobileSpec
     ? [`app/${slug}.tsx`, `src/components/${slug}/index.tsx`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
     : isCliSpec
-    ? [`src/commands/${slug}.ts`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
+    ? [`${profile.sourceDir}/commands/${slug}${profile.sourceExtension}`, profile.modulePath(`${slug}Service`), profile.modulePath(`${slug}Types`)]
     : isNextjs
     ? [`src/app/${slug}/page.tsx`, `src/components/${slug}/index.tsx`, `src/services/${slug}.ts`, `src/types/${slug}.ts`]
-    : [`src/features/${slug}/index.ts`, `src/services/${slug}.ts`, `src/types/${slug}.ts`];
+    : [profile.modulePath(`features/${slug}/index`), profile.modulePath(`${slug}Service`), profile.modulePath(`${slug}Types`)];
 
   // Derive files_to_modify from platform — never hardcode Next.js paths for all platforms
   const filesToModify: string[] = isMobileSpec
     ? [`app/_layout.tsx`, `src/components/navigation/TabNavigator.tsx`]
     : isCliSpec
-    ? [`src/index.ts`]
+    ? [profile.modulePath('index')]
     : isNextjs
     ? [`src/app/layout.tsx`, `src/components/navigation/Navigation.tsx`]
-    : [`src/main.tsx`, `src/router.tsx`];
+    : [profile.modulePath('main'), profile.modulePath('router')];
 
   // Derive acceptance criteria from feature name + stack
   const acceptanceCriteria: string[] = [
     `${feature} works end-to-end on ${spec.platform} without errors`,
     `No technology outside the locked stack (${locked.map(([, e]) => e.value).join(', ')}) is imported`,
-    `TypeScript strict mode passes — no implicit \`any\` types`,
+    `${profile.displayName} strict types pass — no implicit un-typed variables`,
     `Loading, error, and empty states are all handled gracefully`,
-    `All public service functions in src/services/${slug}.ts have unit tests`,
+    `All public service functions in ${profile.modulePath(`${slug}Service`)} have unit tests`,
   ];
 
   const text = feature.toLowerCase();
@@ -321,12 +327,12 @@ function buildFallbackManifest(
     ? ['npx vitest run', `npx vitest run src/__tests__/${slug}.test.ts`]
     : hasJest
     ? ['npx jest', `npx jest --testPathPattern=${slug}`]
-    : [`npm test`];
+    : [profile.testCommand];
 
   // Derive common mistakes from stack
   const commonMistakes: string[] = [
-    `Importing external SDKs directly in component files instead of src/services/${slug}.ts`,
-    'Using \`any\` type instead of the domain types in src/types/${slug}.ts',
+    `Importing external SDKs directly in component files instead of ${profile.modulePath(`${slug}Service`)}`,
+    `Using loosely typed values instead of the domain types in ${profile.modulePath(`${slug}Types`)}`,
   ];
   if (locked.some(([, e]) => e.value.toLowerCase().includes('supabase'))) {
     commonMistakes.push('Querying Supabase without user_id filter — always add .eq("user_id", userId)');

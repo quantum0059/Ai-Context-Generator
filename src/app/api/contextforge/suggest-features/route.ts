@@ -3,6 +3,7 @@ import { isClaudeConfigured } from "@/lib/claude";
 import type { Feature, FeatureSet } from "@/types/projectspec";
 import { normalizeAndGroupFeatures } from "@/contextforge/feature-pipeline";
 import { withCompression } from "@/lib/compression";
+import { extractArchitecturalRequirements } from "@/contextforge/requirement-extractor";
 
 // ─── Request schema ───────────────────────────────────────────────────────────
 
@@ -370,8 +371,21 @@ export async function POST(req: Request) {
   // Build a normalised Set of already-provided feature names for deduplication
   const existingFeatureNames = new Set(existingFeatures.map((f) => f.toLowerCase()));
 
-  // ── Heuristic path (no AI configured) ──────────────────────────────────────
-  if (!isClaudeConfigured() || functionalRequirements.length === 0) {
+  let activeFunctionalRequirements = functionalRequirements;
+  let archReqs = null;
+
+  // ── AI extraction of architectural requirements ──────────────────────────────
+  if (isClaudeConfigured() && activeFunctionalRequirements.length === 0) {
+    try {
+      archReqs = await extractArchitecturalRequirements(description, platform, projectName);
+      activeFunctionalRequirements = archReqs.functional;
+    } catch (e) {
+      console.error("[SuggestFeatures] Failed to extract architectural requirements", e);
+    }
+  }
+
+  // ── Heuristic path (no AI configured or extraction failed) ─────────────────
+  if (!isClaudeConfigured() || activeFunctionalRequirements.length === 0) {
     const set = heuristicFeatureSet(description, platform, projectType, existingFeatureNames);
     return withCompression({
       ...set,
@@ -380,10 +394,10 @@ export async function POST(req: Request) {
     }, req);
   }
 
-  // ── AI path ─────────────────────────────────────────────────────────────────
+  // ── AI path for feature grouping ────────────────────────────────────────────
   try {
     const result = await normalizeAndGroupFeatures(
-      functionalRequirements,
+      activeFunctionalRequirements,
       projectName,
       existingFeatures
     );
@@ -403,6 +417,7 @@ export async function POST(req: Request) {
       ...deduped,
       features: flattenFeatureNames(deduped), // backwards-compat flat list
       engine: "ai",
+      architecturalRequirements: archReqs,
     }, req);
   } catch (err) {
     console.error("[SuggestFeatures Error]", err);

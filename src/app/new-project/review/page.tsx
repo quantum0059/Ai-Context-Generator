@@ -100,6 +100,7 @@ export default function ReviewPage() {
       projectSpecVersion: "1.0.0",
       projectType: state.projectType,
       classificationReason: state.classificationReason,
+      architecturalRequirements: state.architecturalRequirements,
     };
   };
 

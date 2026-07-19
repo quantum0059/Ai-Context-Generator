@@ -722,6 +722,18 @@ export const createTask = mutation({
  * AI agent always sees correct patterns without hallucinating alternatives.
  */
 export function buildTechCodeSnippets(spec: ProjectSpec): string {
+  const ecosystem = detectPrimaryEcosystem(spec);
+  const isNonJs = isNonJsEcosystem(ecosystem);
+  
+  // These tools have snippets that hardcode TypeScript/Node.js conventions.
+  // If the ecosystem is non-JS, we MUST NOT inject these snippets because they
+  // will contaminate the backend Java/Python/Go code with Node imports (e.g. pg, @clerk/nextjs).
+  const jsOnlySnippetKeys = new Set([
+    'clerk', 'auth0', 'jwt', 'postgresql', 'websocket', 'supabase', 
+    'stripe', 'google gemini', 'openai', 'zustand', 'next.js', 
+    'prisma', 'drizzle', 'better-sqlite3', 'firebase', 'resend', 'convex'
+  ]);
+
   let snippets = '';
   for (const [category, entry] of lockedEntries(spec)) {
     const toolKey = entry.value.toLowerCase();
@@ -729,6 +741,8 @@ export function buildTechCodeSnippets(spec: ProjectSpec): string {
       (k) => toolKey.includes(k) || k.includes(toolKey.split(' ')[0])
     );
     if (matchedKey) {
+      if (isNonJs && jsOnlySnippetKeys.has(matchedKey)) continue;
+
       const fn = TOOL_SNIPPET_MAP[matchedKey];
       snippets += `### ${entry.value} (${category})\n\n${fn(spec.platform)}\n\n`;
     }
