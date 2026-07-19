@@ -3,13 +3,13 @@ import { GROQ_API_KEYS } from "../config/groq-keys";
 import { MODELS, type AiModel } from "../lib/ai-models";
 
 const WINDOW_MS = 60_000;
+const JSON_VALIDATION_RETRIES = 2;
 
 // Verified against Groq's official rate-limit page on July 19, 2026:
 // https://console.groq.com/docs/rate-limits
 export const MODEL_LIMITS: Record<string, number> = {
   [MODELS.CONTENT]: 8_000,
   [MODELS.FAST]: 8_000,
-  [MODELS.CONTENT_FALLBACK]: 8_000,
 };
 
 type UsageEntry = {
@@ -205,16 +205,16 @@ export async function callGroqJsonWithKey<T>({
   maxTokens: number;
 }): Promise<{ value: T; tokensUsed: number }> {
   let lastError: unknown;
+  const jsonInstruction =
+    'IMPORTANT: Return only valid JSON that follows the requested field contract. Optional fields may be omitted unless the prompt explicitly requires them; excludedCategories may be []; suggestedTools applies only to custom categories.';
+  const strictJsonInstruction =
+    'CRITICAL JSON-ONLY RETRY: Output exactly one JSON object. The first character must be { and the last character must be }. Do not include markdown, code fences, explanations, or any text outside the JSON object.';
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
+    for (let jsonAttempt = 0; jsonAttempt <= JSON_VALIDATION_RETRIES; jsonAttempt += 1) {
+      try {
+        const isJsonRetry = jsonAttempt > 0;
+        const body: Record<string, unknown> = {
           model,
           max_tokens: maxTokens,
           temperature: 0,
@@ -223,41 +223,70 @@ export async function callGroqJsonWithKey<T>({
             { role: "system", content: systemPrompt },
             {
               role: "user",
-              content: `${userPrompt}\n\nIMPORTANT: Return only valid JSON that follows the requested field contract. Optional fields may be omitted unless the prompt explicitly requires them; excludedCategories may be []; suggestedTools applies only to custom categories.`,
+              content: `${userPrompt}\n\n${jsonInstruction}${isJsonRetry ? `\n\n${strictJsonInstruction}` : ""}`,
             },
           ],
-        }),
-      });
+        };
 
-      if (!response.ok) {
-        const responseText = await response.text().catch(() => response.statusText);
-        const retryAfterHeader = response.headers.get("retry-after");
-        const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
-        throw new GroqApiError(
-          `Groq API error ${response.status}: ${responseText}`,
-          response.status,
-          retryAfterMs,
-          responseText,
-        );
-      }
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(body),
+        });
 
-      const data = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-        usage?: { total_tokens?: number };
-      };
-      const text = data.choices?.[0]?.message?.content ?? "";
-      const parsed = schema.safeParse(JSON.parse(extractJson(text)));
-      if (!parsed.success) {
-        throw new Error(`Schema validation failed: ${parsed.error.message}`);
-      }
-      return {
-        value: parsed.data,
-        tokensUsed: data.usage?.total_tokens ?? maxTokens,
-      };
-    } catch (error) {
-      lastError = error;
-      if (error instanceof GroqApiError && error.status === 429) {
-        throw error;
+        if (!response.ok) {
+          const responseText = await response.text().catch(() => response.statusText);
+          const retryAfterHeader = response.headers.get("retry-after");
+          const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : undefined;
+          const error = new GroqApiError(
+            `Groq API error ${response.status}: ${responseText}`,
+            response.status,
+            retryAfterMs,
+            responseText,
+          );
+
+          if (
+            response.status === 400 &&
+            responseText.includes("json_validate_failed")
+          ) {
+            if (jsonAttempt < JSON_VALIDATION_RETRIES) {
+              console.log(
+                `[GroqJSON] json_validate_failed for ${model}; retrying same key with response_format still enabled (${jsonAttempt + 1}/${JSON_VALIDATION_RETRIES}).`,
+              );
+              lastError = error;
+              continue;
+            }
+
+            console.log(
+              `[GroqJSON] json_validate_failed for ${model}; exhausted ${JSON_VALIDATION_RETRIES} same-key retries with response_format enabled.`,
+            );
+          }
+
+          throw error;
+        }
+
+        const data = (await response.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+          usage?: { total_tokens?: number };
+        };
+        const text = data.choices?.[0]?.message?.content ?? "";
+        const parsed = schema.safeParse(JSON.parse(extractJson(text)));
+        if (!parsed.success) {
+          throw new Error(`Schema validation failed: ${parsed.error.message}`);
+        }
+        return {
+          value: parsed.data,
+          tokensUsed: data.usage?.total_tokens ?? maxTokens,
+        };
+      } catch (error) {
+        lastError = error;
+        if (error instanceof GroqApiError && error.status === 429) {
+          throw error;
+        }
+        break;
       }
     }
   }
